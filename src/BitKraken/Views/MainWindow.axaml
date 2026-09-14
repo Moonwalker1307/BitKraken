@@ -1,0 +1,529 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:BitKraken.ViewModels"
+        xmlns:c="using:BitKraken.Controls"
+        xmlns:chrome="using:Avalonia.Controls.Chrome"
+        x:Class="BitKraken.Views.MainWindow"
+        x:DataType="vm:MainWindowViewModel"
+        Title="BitKraken"
+        Width="1240" Height="800"
+        MinWidth="900" MinHeight="560"
+        WindowStartupLocation="CenterScreen"
+        ExtendClientAreaToDecorationsHint="True"
+        ExtendClientAreaTitleBarHeightHint="44"
+        TransparencyLevelHint="AcrylicBlur, Blur, Transparent, None"
+        Background="Transparent"
+        Icon="avares://BitKraken/Assets/bitkraken.png">
+
+    <Window.Resources>
+        <!-- Torrent card template -->
+        <DataTemplate x:Key="TorrentCardTemplate" x:DataType="vm:TorrentItemViewModel">
+            <Panel Classes="fadein">
+                <Border Classes="cardShadow" />
+                <Border Classes="card">
+                <Grid RowDefinitions="Auto,10,Auto,10,Auto" ColumnDefinitions="*,Auto">
+
+                    <!-- Row 0: name + status pill -->
+                    <StackPanel Grid.Row="0" Grid.Column="0" Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+                        <Ellipse Width="8" Height="8" Fill="{Binding StatusBrush}" Classes.pulse="{Binding IsActive}" VerticalAlignment="Center" />
+                        <TextBlock Text="{Binding Name}" FontSize="14" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" MaxWidth="700" />
+                        <Border Classes="pill" IsVisible="{Binding HasError}" Background="#33F87171">
+                            <TextBlock Text="{Binding ErrorText}" Foreground="{StaticResource Kraken.RedBrush}" TextTrimming="CharacterEllipsis" MaxWidth="300" />
+                        </Border>
+                    </StackPanel>
+
+                    <StackPanel Grid.Row="0" Grid.Column="1" Orientation="Horizontal" Spacing="6">
+                        <Border Classes="pill">
+                            <TextBlock Text="{Binding StatusText}" Foreground="{Binding StatusBrush}" />
+                        </Border>
+                        <Button Classes="ghost icon" Width="28" Height="28" Padding="5" Command="{Binding TogglePauseCommand}"
+                                ToolTip.Tip="Pause / Resume">
+                            <Panel>
+                                <PathIcon Data="{StaticResource Icon.Pause}" Width="14" Height="14" IsVisible="{Binding IsActive}" />
+                                <PathIcon Data="{StaticResource Icon.Play}" Width="14" Height="14" IsVisible="{Binding !IsActive}" />
+                            </Panel>
+                        </Button>
+                    </StackPanel>
+
+                    <!-- Row 2: progress -->
+                    <c:GlowProgressBar Grid.Row="2" Grid.ColumnSpan="2"
+                                       Value="{Binding Progress}"
+                                       Fill="{Binding ProgressBrush}"
+                                       GlowColor="{Binding GlowColor}"
+                                       IsActive="{Binding IsDownloading}"
+                                       TrackBrush="{StaticResource Kraken.Bg4Brush}"
+                                       BarHeight="6" />
+
+                    <!-- Row 4: stats -->
+                    <StackPanel Grid.Row="4" Grid.Column="0" Orientation="Horizontal" Spacing="16">
+                        <TextBlock Classes="secondary" FontSize="12">
+                            <Run Text="{Binding ProgressText}" FontWeight="SemiBold" Foreground="{StaticResource Kraken.TextBrush}" />
+                            <Run Text=" of " />
+                            <Run Text="{Binding SizeText}" />
+                        </TextBlock>
+                        <StackPanel Orientation="Horizontal" Spacing="4">
+                            <PathIcon Data="{StaticResource Icon.Down}" Width="12" Height="12" Foreground="{StaticResource Kraken.VioletLightBrush}" />
+                            <TextBlock Classes="secondary mono" FontSize="12" Text="{Binding DownloadRateText}" />
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal" Spacing="4">
+                            <PathIcon Data="{StaticResource Icon.Up}" Width="12" Height="12" Foreground="{StaticResource Kraken.CyanBrush}" />
+                            <TextBlock Classes="secondary mono" FontSize="12" Text="{Binding UploadRateText}" />
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal" Spacing="4">
+                            <PathIcon Data="{StaticResource Icon.Peers}" Width="12" Height="12" Foreground="{StaticResource Kraken.TextMutedBrush}" />
+                            <TextBlock Classes="secondary" FontSize="12" Text="{Binding PeersText}" ToolTip.Tip="Seeds / Peers" />
+                        </StackPanel>
+                    </StackPanel>
+                    <TextBlock Grid.Row="4" Grid.Column="1" Classes="muted" FontSize="12" VerticalAlignment="Center">
+                        <Run Text="ETA " /><Run Text="{Binding EtaText}" Foreground="{StaticResource Kraken.TextSecondaryBrush}" />
+                    </TextBlock>
+                </Grid>
+                </Border>
+            </Panel>
+        </DataTemplate>
+    </Window.Resources>
+
+    <Panel>
+        <!-- Layered backdrop -->
+        <Border Background="{StaticResource Kraken.WindowGradient}" />
+        <c:AuroraBackground IsAnimated="{Binding AnimatedBackground}" />
+
+        <Grid RowDefinitions="44,*,30" Name="RootGrid">
+
+            <!-- ============ Title bar ============ -->
+            <Grid Grid.Row="0" Name="TitleBar" ColumnDefinitions="Auto,*,Auto" Background="Transparent"
+                  chrome:WindowDecorationProperties.ElementRole="TitleBar">
+                <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="10" VerticalAlignment="Center" Name="TitleLeft" Margin="16,0,0,0">
+                    <Panel Width="26" Height="26">
+                        <Border CornerRadius="8" Background="{StaticResource Kraken.AccentGradient}" BoxShadow="0 0 18 0 #808B5CF6" />
+                        <Path Data="{StaticResource Kraken.LogoGeometry}" Stretch="Uniform" Width="17" Height="17" Fill="White" />
+                    </Panel>
+                    <TextBlock Text="BitKraken" Classes="gradient" FontSize="15" FontWeight="Bold" VerticalAlignment="Center" />
+                    <TextBlock Text="v1.0" Classes="muted" FontSize="11" VerticalAlignment="Center" Margin="-4,2,0,0" />
+                </StackPanel>
+
+                <!-- Windows / Linux caption buttons; hidden on macOS -->
+                <StackPanel Grid.Column="2" Orientation="Horizontal" Name="CaptionButtons" VerticalAlignment="Top" Margin="0,4,6,0" Spacing="2">
+                    <Button Classes="chrome" Name="MinimizeButton" chrome:WindowDecorationProperties.ElementRole="MinimizeButton" ToolTip.Tip="Minimize">
+                        <PathIcon Data="{StaticResource Icon.Minimize}" Width="14" Height="14" />
+                    </Button>
+                    <Button Classes="chrome" Name="MaximizeButton" chrome:WindowDecorationProperties.ElementRole="MaximizeButton" ToolTip.Tip="Maximize">
+                        <PathIcon Data="{StaticResource Icon.Maximize}" Width="12" Height="12" />
+                    </Button>
+                    <Button Classes="chrome close" Name="CloseButton" chrome:WindowDecorationProperties.ElementRole="CloseButton" ToolTip.Tip="Close">
+                        <PathIcon Data="{StaticResource Icon.Close}" Width="14" Height="14" />
+                    </Button>
+                </StackPanel>
+            </Grid>
+
+            <!-- ============ Body ============ -->
+            <Grid Grid.Row="1" ColumnDefinitions="232,*" Margin="10,0,10,0">
+
+                <!-- Sidebar -->
+                <Border Grid.Column="0" Background="{StaticResource Kraken.Glass}" CornerRadius="16"
+                        BorderBrush="{StaticResource Kraken.BorderBrush}" BorderThickness="1" Padding="12" Margin="0,0,10,0">
+                    <Grid RowDefinitions="Auto,Auto,*,Auto">
+
+                        <Button Grid.Row="0" Classes="primary" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+                                Command="{Binding AddTorrentFileCommand}" Padding="12,10">
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <PathIcon Data="{StaticResource Icon.Add}" Width="16" Height="16" Foreground="White" />
+                                <TextBlock Text="Add torrent" Foreground="White" FontWeight="SemiBold" />
+                            </StackPanel>
+                        </Button>
+                        <Button Grid.Row="1" Classes="ghost" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" Margin="0,6,0,14"
+                                Command="{Binding AddMagnetCommand}" Padding="12,8">
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <PathIcon Data="{StaticResource Icon.Magnet}" Width="15" Height="15" />
+                                <TextBlock Text="Add magnet link" />
+                            </StackPanel>
+                        </Button>
+
+                        <StackPanel Grid.Row="2" Spacing="2">
+                            <TextBlock Text="TORRENTS" Classes="label" Margin="12,0,0,6" />
+
+                            <RadioButton Classes="nav" GroupName="filter" IsChecked="{Binding IsFilterAll}">
+                                <Grid ColumnDefinitions="Auto,*,Auto">
+                                    <PathIcon Grid.Column="0" Data="{StaticResource Icon.All}" Width="15" Height="15" Margin="0,0,10,0" />
+                                    <TextBlock Grid.Column="1" Text="All" VerticalAlignment="Center" />
+                                    <TextBlock Grid.Column="2" Text="{Binding TotalCount}" Classes="muted" FontSize="12" VerticalAlignment="Center" />
+                                </Grid>
+                            </RadioButton>
+                            <RadioButton Classes="nav" GroupName="filter" IsChecked="{Binding IsFilterDownloading}">
+                                <Grid ColumnDefinitions="Auto,*,Auto">
+                                    <PathIcon Grid.Column="0" Data="{StaticResource Icon.Down}" Width="15" Height="15" Margin="0,0,10,0" Foreground="{StaticResource Kraken.VioletLightBrush}" />
+                                    <TextBlock Grid.Column="1" Text="Downloading" VerticalAlignment="Center" />
+                                    <TextBlock Grid.Column="2" Text="{Binding DownloadingCount}" Classes="muted" FontSize="12" VerticalAlignment="Center" />
+                                </Grid>
+                            </RadioButton>
+                            <RadioButton Classes="nav" GroupName="filter" IsChecked="{Binding IsFilterSeeding}">
+                                <Grid ColumnDefinitions="Auto,*,Auto">
+                                    <PathIcon Grid.Column="0" Data="{StaticResource Icon.Seed}" Width="15" Height="15" Margin="0,0,10,0" Foreground="{StaticResource Kraken.CyanBrush}" />
+                                    <TextBlock Grid.Column="1" Text="Seeding" VerticalAlignment="Center" />
+                                    <TextBlock Grid.Column="2" Text="{Binding SeedingCount}" Classes="muted" FontSize="12" VerticalAlignment="Center" />
+                                </Grid>
+                            </RadioButton>
+                            <RadioButton Classes="nav" GroupName="filter" IsChecked="{Binding IsFilterCompleted}">
+                                <Grid ColumnDefinitions="Auto,*,Auto">
+                                    <PathIcon Grid.Column="0" Data="{StaticResource Icon.Check}" Width="15" Height="15" Margin="0,0,10,0" Foreground="{StaticResource Kraken.GreenBrush}" />
+                                    <TextBlock Grid.Column="1" Text="Completed" VerticalAlignment="Center" />
+                                    <TextBlock Grid.Column="2" Text="{Binding CompletedCount}" Classes="muted" FontSize="12" VerticalAlignment="Center" />
+                                </Grid>
+                            </RadioButton>
+                            <RadioButton Classes="nav" GroupName="filter" IsChecked="{Binding IsFilterPaused}">
+                                <Grid ColumnDefinitions="Auto,*,Auto">
+                                    <PathIcon Grid.Column="0" Data="{StaticResource Icon.Pause}" Width="15" Height="15" Margin="0,0,10,0" Foreground="{StaticResource Kraken.TextMutedBrush}" />
+                                    <TextBlock Grid.Column="1" Text="Paused" VerticalAlignment="Center" />
+                                    <TextBlock Grid.Column="2" Text="{Binding PausedCount}" Classes="muted" FontSize="12" VerticalAlignment="Center" />
+                                </Grid>
+                            </RadioButton>
+                            <RadioButton Classes="nav" GroupName="filter" IsChecked="{Binding IsFilterError}" IsVisible="{Binding HasErrors}">
+                                <Grid ColumnDefinitions="Auto,*,Auto">
+                                    <PathIcon Grid.Column="0" Data="{StaticResource Icon.Warning}" Width="15" Height="15" Margin="0,0,10,0" Foreground="{StaticResource Kraken.RedBrush}" />
+                                    <TextBlock Grid.Column="1" Text="Errors" VerticalAlignment="Center" />
+                                    <TextBlock Grid.Column="2" Text="{Binding ErrorCount}" Classes="muted" FontSize="12" VerticalAlignment="Center" />
+                                </Grid>
+                            </RadioButton>
+                        </StackPanel>
+
+                        <!-- Global transfer graph -->
+                        <StackPanel Grid.Row="3" Spacing="8">
+                            <TextBlock Text="TRANSFER" Classes="label" Margin="12,0,0,0" />
+                            <Border Background="{StaticResource Kraken.Bg1Brush}" CornerRadius="12" Padding="8,6" BorderBrush="{StaticResource Kraken.BorderBrush}" BorderThickness="1">
+                                <c:SpeedGraph Height="70" DownloadSamples="{Binding DownloadSamples}" UploadSamples="{Binding UploadSamples}" />
+                            </Border>
+                            <Grid ColumnDefinitions="*,*" Margin="4,0,4,2">
+                                <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="6">
+                                    <PathIcon Data="{StaticResource Icon.Down}" Width="13" Height="13" Foreground="{StaticResource Kraken.VioletLightBrush}" />
+                                    <TextBlock Text="{Binding TotalDownloadRateText}" Classes="mono" FontSize="12" FontWeight="SemiBold" />
+                                </StackPanel>
+                                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" HorizontalAlignment="Right">
+                                    <PathIcon Data="{StaticResource Icon.Up}" Width="13" Height="13" Foreground="{StaticResource Kraken.CyanBrush}" />
+                                    <TextBlock Text="{Binding TotalUploadRateText}" Classes="mono" FontSize="12" FontWeight="SemiBold" />
+                                </StackPanel>
+                            </Grid>
+                        </StackPanel>
+                    </Grid>
+                </Border>
+
+                <!-- Main content -->
+                <Grid Grid.Column="1" RowDefinitions="Auto,*,Auto">
+
+                    <!-- Toolbar -->
+                    <Grid Grid.Row="0" ColumnDefinitions="*,Auto" Margin="0,0,0,10">
+                        <Border Grid.Column="0" MaxWidth="420" HorizontalAlignment="Left" Width="360">
+                            <Panel>
+                                <TextBox Text="{Binding SearchText}" PlaceholderText="Search torrents…" Padding="36,8,12,8" />
+                                <PathIcon Data="{StaticResource Icon.Search}" Width="15" Height="15" HorizontalAlignment="Left" Margin="12,0,0,0"
+                                          Foreground="{StaticResource Kraken.TextMutedBrush}" IsHitTestVisible="False" />
+                            </Panel>
+                        </Border>
+
+                        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="4">
+                            <Button Classes="ghost icon" Command="{Binding StartSelectedCommand}" ToolTip.Tip="Resume selected">
+                                <PathIcon Data="{StaticResource Icon.Play}" />
+                            </Button>
+                            <Button Classes="ghost icon" Command="{Binding PauseSelectedCommand}" ToolTip.Tip="Pause selected">
+                                <PathIcon Data="{StaticResource Icon.Pause}" />
+                            </Button>
+                            <Button Classes="ghost icon danger" Command="{Binding RemoveSelectedCommand}" ToolTip.Tip="Remove selected">
+                                <PathIcon Data="{StaticResource Icon.Delete}" />
+                            </Button>
+                            <Border Width="1" Height="20" Background="{StaticResource Kraken.BorderBrush}" Margin="6,0" />
+                            <Button Classes="ghost icon" Command="{Binding RecheckSelectedCommand}" ToolTip.Tip="Force re-check">
+                                <PathIcon Data="{StaticResource Icon.Refresh}" />
+                            </Button>
+                            <Button Classes="ghost icon" Command="{Binding OpenFolderCommand}" ToolTip.Tip="Open folder">
+                                <PathIcon Data="{StaticResource Icon.Folder}" />
+                            </Button>
+                            <Button Classes="ghost icon" Command="{Binding CopyMagnetCommand}" ToolTip.Tip="Copy magnet link">
+                                <PathIcon Data="{StaticResource Icon.Link}" />
+                            </Button>
+                            <Border Width="1" Height="20" Background="{StaticResource Kraken.BorderBrush}" Margin="6,0" />
+                            <Button Classes="ghost" Padding="10,6" ToolTip.Tip="Start / pause all">
+                                <Button.Flyout>
+                                    <MenuFlyout Placement="BottomEdgeAlignedRight">
+                                        <MenuItem Header="Resume all" Command="{Binding StartAllCommand}" />
+                                        <MenuItem Header="Pause all" Command="{Binding PauseAllCommand}" />
+                                    </MenuFlyout>
+                                </Button.Flyout>
+                                <TextBlock Text="All ▾" FontSize="12" />
+                            </Button>
+                            <Button Classes="ghost icon" Command="{Binding ToggleDetailsCommand}" ToolTip.Tip="Toggle details panel">
+                                <PathIcon Data="{StaticResource Icon.File}" />
+                            </Button>
+                            <Button Classes="ghost icon" Command="{Binding OpenSettingsCommand}" ToolTip.Tip="Settings">
+                                <PathIcon Data="{StaticResource Icon.Settings}" />
+                            </Button>
+                        </StackPanel>
+                    </Grid>
+
+                    <!-- Torrent list -->
+                    <Panel Grid.Row="1">
+                        <ListBox Classes="torrents" ItemsSource="{Binding FilteredTorrents}" SelectedItem="{Binding SelectedTorrent}"
+                                 ItemTemplate="{StaticResource TorrentCardTemplate}" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                            <ListBox.ContextMenu>
+                                <ContextMenu>
+                                    <MenuItem Header="Resume" Command="{Binding StartSelectedCommand}" />
+                                    <MenuItem Header="Pause" Command="{Binding PauseSelectedCommand}" />
+                                    <Separator />
+                                    <MenuItem Header="Force re-check" Command="{Binding RecheckSelectedCommand}" />
+                                    <MenuItem Header="Open folder" Command="{Binding OpenFolderCommand}" />
+                                    <MenuItem Header="Copy magnet link" Command="{Binding CopyMagnetCommand}" />
+                                    <Separator />
+                                    <MenuItem Header="Remove…" Command="{Binding RemoveSelectedCommand}" />
+                                </ContextMenu>
+                            </ListBox.ContextMenu>
+                        </ListBox>
+
+                        <!-- Empty state -->
+                        <StackPanel IsVisible="{Binding IsEmpty}" VerticalAlignment="Center" HorizontalAlignment="Center" Spacing="14" Opacity="0.9">
+                            <Panel Width="88" Height="88">
+                                <Border CornerRadius="28" Background="{StaticResource Kraken.VioletBrush10}"
+                                        BorderBrush="{StaticResource Kraken.VioletBrush40}" BorderThickness="1" BoxShadow="0 0 60 0 #338B5CF6" />
+                                <Path Data="{StaticResource Kraken.LogoGeometry}" Stretch="Uniform" Width="46" Height="46" Fill="{StaticResource Kraken.VioletLightBrush}" />
+                            </Panel>
+                            <TextBlock Text="Release the Kraken" Classes="h1" HorizontalAlignment="Center" />
+                            <TextBlock Text="Drop a .torrent file here, paste a magnet link, or click Add torrent." Classes="secondary" HorizontalAlignment="Center" TextAlignment="Center" />
+                        </StackPanel>
+                        <StackPanel IsVisible="{Binding IsFilteredEmpty}" VerticalAlignment="Center" HorizontalAlignment="Center" Spacing="6">
+                            <TextBlock Text="Nothing here" Classes="h2" HorizontalAlignment="Center" />
+                            <TextBlock Text="No torrents match this filter." Classes="muted" HorizontalAlignment="Center" />
+                        </StackPanel>
+                    </Panel>
+
+                    <!-- Details panel -->
+                    <Border Grid.Row="2" IsVisible="{Binding IsDetailsOpen}" Height="270" Margin="0,10,0,0"
+                            Background="{StaticResource Kraken.Glass}" CornerRadius="16"
+                            BorderBrush="{StaticResource Kraken.BorderBrush}" BorderThickness="1" Padding="14,10">
+                        <Panel>
+                            <TextBlock IsVisible="{Binding !HasSelection}" Text="Select a torrent to see its details" Classes="muted"
+                                       HorizontalAlignment="Center" VerticalAlignment="Center" />
+
+                            <Panel IsVisible="{Binding HasSelection}">
+                            <TabControl Name="DetailsTabs" Classes="pills" DataContext="{Binding SelectedTorrent}" x:DataType="vm:TorrentItemViewModel">
+
+                                <!-- Overview -->
+                                <TabItem Header="Overview">
+                                    <Grid ColumnDefinitions="3*,16,2*" RowDefinitions="Auto,*">
+                                        <TextBlock Grid.Row="0" Grid.Column="0" Text="{Binding PieceInfo}" Classes="muted" FontSize="11" Margin="0,0,0,6" />
+                                        <Grid Grid.Row="1" Grid.Column="0" RowDefinitions="44,10,*">
+                                            <c:PieceMap Grid.Row="0" Pieces="{Binding Pieces}" />
+                                            <Border Grid.Row="2" Background="{StaticResource Kraken.Bg1Brush}" CornerRadius="10" Padding="6,4"
+                                                    BorderBrush="{StaticResource Kraken.BorderBrush}" BorderThickness="1">
+                                                <c:SpeedGraph DownloadSamples="{Binding DownloadSamples}" UploadSamples="{Binding UploadSamples}" />
+                                            </Border>
+                                        </Grid>
+
+                                        <ScrollViewer Grid.Row="0" Grid.RowSpan="2" Grid.Column="2">
+                                            <Grid ColumnDefinitions="Auto,12,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto">
+                                                <Grid.Styles>
+                                                    <Style Selector="TextBlock.k">
+                                                        <Setter Property="Foreground" Value="{StaticResource Kraken.TextMutedBrush}" />
+                                                        <Setter Property="FontSize" Value="12" />
+                                                        <Setter Property="Margin" Value="0,0,0,7" />
+                                                    </Style>
+                                                    <Style Selector="TextBlock.v">
+                                                        <Setter Property="FontSize" Value="12" />
+                                                        <Setter Property="Margin" Value="0,0,0,7" />
+                                                        <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+                                                    </Style>
+                                                </Grid.Styles>
+                                                <TextBlock Grid.Row="0" Grid.Column="0" Classes="k" Text="Received (session)" />
+                                                <TextBlock Grid.Row="0" Grid.Column="2" Classes="v" Text="{Binding DownloadedText}" />
+                                                <TextBlock Grid.Row="1" Grid.Column="0" Classes="k" Text="Sent (session)" />
+                                                <TextBlock Grid.Row="1" Grid.Column="2" Classes="v" Text="{Binding UploadedText}" />
+                                                <TextBlock Grid.Row="2" Grid.Column="0" Classes="k" Text="Share ratio" />
+                                                <TextBlock Grid.Row="2" Grid.Column="2" Classes="v" Text="{Binding RatioText}" />
+                                                <TextBlock Grid.Row="3" Grid.Column="0" Classes="k" Text="Connected" />
+                                                <TextBlock Grid.Row="3" Grid.Column="2" Classes="v" Text="{Binding ConnectedPeers}" />
+                                                <TextBlock Grid.Row="4" Grid.Column="0" Classes="k" Text="Save path" />
+                                                <TextBlock Grid.Row="4" Grid.Column="2" Classes="v" Text="{Binding SavePath}" ToolTip.Tip="{Binding SavePath}" />
+                                                <TextBlock Grid.Row="5" Grid.Column="0" Classes="k" Text="Info hash" />
+                                                <TextBlock Grid.Row="5" Grid.Column="2" Classes="v mono" Text="{Binding InfoHash}" />
+                                                <TextBlock Grid.Row="6" Grid.Column="0" Classes="k" Text="Started" />
+                                                <TextBlock Grid.Row="6" Grid.Column="2" Classes="v" Text="{Binding AddedAtText}" />
+                                                <TextBlock Grid.Row="7" Grid.Column="0" Classes="k" Text="Created by" IsVisible="{Binding CreatedBy, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                                                <TextBlock Grid.Row="7" Grid.Column="2" Classes="v" Text="{Binding CreatedBy}" IsVisible="{Binding CreatedBy, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                                                <TextBlock Grid.Row="8" Grid.Column="0" Classes="k" Text="Comment" IsVisible="{Binding Comment, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                                                <TextBlock Grid.Row="8" Grid.Column="2" Classes="v" Text="{Binding Comment}" TextWrapping="Wrap" IsVisible="{Binding Comment, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                                                <TextBlock Grid.Row="9" Grid.Column="0" Classes="k" Text="Private" IsVisible="{Binding IsPrivate}" />
+                                                <TextBlock Grid.Row="9" Grid.Column="2" Classes="v" Text="Yes — DHT/PEX disabled" IsVisible="{Binding IsPrivate}" />
+                                            </Grid>
+                                        </ScrollViewer>
+                                    </Grid>
+                                </TabItem>
+
+                                <!-- Files -->
+                                <TabItem Header="Files">
+                                    <Grid RowDefinitions="Auto,*">
+                                        <Grid Grid.Row="0" ColumnDefinitions="30,*,90,150,110" Margin="10,0,10,4">
+                                            <TextBlock Grid.Column="1" Text="NAME" Classes="label" />
+                                            <TextBlock Grid.Column="2" Text="SIZE" Classes="label" />
+                                            <TextBlock Grid.Column="3" Text="PROGRESS" Classes="label" />
+                                            <TextBlock Grid.Column="4" Text="PRIORITY" Classes="label" />
+                                        </Grid>
+                                        <ListBox Grid.Row="1" Classes="table" ItemsSource="{Binding Files}">
+                                            <ListBox.ItemTemplate>
+                                                <DataTemplate x:DataType="vm:FileItemViewModel">
+                                                    <Grid ColumnDefinitions="30,*,90,150,110">
+                                                        <CheckBox Grid.Column="0" IsChecked="{Binding IsWanted}" Padding="0" MinWidth="0" />
+                                                        <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                                            <TextBlock Text="{Binding Name}" FontSize="12" TextTrimming="CharacterEllipsis" />
+                                                            <TextBlock Text="{Binding Directory}" FontSize="10" Classes="muted" TextTrimming="CharacterEllipsis"
+                                                                       IsVisible="{Binding Directory, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                                                        </StackPanel>
+                                                        <TextBlock Grid.Column="2" Text="{Binding SizeText}" FontSize="12" Classes="secondary" VerticalAlignment="Center" />
+                                                        <Grid Grid.Column="3" ColumnDefinitions="*,50" VerticalAlignment="Center" Margin="0,0,10,0">
+                                                            <c:GlowProgressBar Grid.Column="0" Value="{Binding Progress}" BarHeight="4"
+                                                                               Fill="{StaticResource Kraken.AccentGradient}" TrackBrush="{StaticResource Kraken.Bg4Brush}" />
+                                                            <TextBlock Grid.Column="1" Text="{Binding ProgressText}" FontSize="11" Classes="muted" HorizontalAlignment="Right" />
+                                                        </Grid>
+                                                        <ComboBox Grid.Column="4" ItemsSource="{Binding Priorities}" SelectedItem="{Binding Priority}"
+                                                                  FontSize="12" MinHeight="26" Padding="8,2" HorizontalAlignment="Stretch" />
+                                                    </Grid>
+                                                </DataTemplate>
+                                            </ListBox.ItemTemplate>
+                                        </ListBox>
+                                    </Grid>
+                                </TabItem>
+
+                                <!-- Peers -->
+                                <TabItem Header="Peers">
+                                    <Grid RowDefinitions="Auto,*">
+                                        <Grid Grid.Row="0" ColumnDefinitions="200,140,140,100,100,*" Margin="10,0,10,4">
+                                            <TextBlock Grid.Column="0" Text="ADDRESS" Classes="label" />
+                                            <TextBlock Grid.Column="1" Text="CLIENT" Classes="label" />
+                                            <TextBlock Grid.Column="2" Text="PROGRESS" Classes="label" />
+                                            <TextBlock Grid.Column="3" Text="DOWN" Classes="label" />
+                                            <TextBlock Grid.Column="4" Text="UP" Classes="label" />
+                                            <TextBlock Grid.Column="5" Text="FLAGS" Classes="label" />
+                                        </Grid>
+                                        <ListBox Grid.Row="1" Classes="table" ItemsSource="{Binding Peers}">
+                                            <ListBox.ItemTemplate>
+                                                <DataTemplate x:DataType="vm:PeerItemViewModel">
+                                                    <Grid ColumnDefinitions="200,140,140,100,100,*">
+                                                        <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="6">
+                                                            <Ellipse Width="6" Height="6" Fill="{StaticResource Kraken.CyanBrush}" IsVisible="{Binding IsSeeder}" VerticalAlignment="Center" />
+                                                            <TextBlock Text="{Binding Address}" FontSize="12" Classes="mono" VerticalAlignment="Center" />
+                                                        </StackPanel>
+                                                        <TextBlock Grid.Column="1" Text="{Binding Client}" FontSize="12" Classes="secondary" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                                                        <Grid Grid.Column="2" ColumnDefinitions="*,46" VerticalAlignment="Center" Margin="0,0,10,0">
+                                                            <c:GlowProgressBar Grid.Column="0" Value="{Binding Progress}" BarHeight="4"
+                                                                               Fill="{StaticResource Kraken.SeedGradient}" GlowColor="#22D3EE" TrackBrush="{StaticResource Kraken.Bg4Brush}" />
+                                                            <TextBlock Grid.Column="1" Text="{Binding ProgressText}" FontSize="11" Classes="muted" HorizontalAlignment="Right" />
+                                                        </Grid>
+                                                        <TextBlock Grid.Column="3" Text="{Binding DownloadRate}" FontSize="12" Classes="mono" VerticalAlignment="Center" />
+                                                        <TextBlock Grid.Column="4" Text="{Binding UploadRate}" FontSize="12" Classes="mono" VerticalAlignment="Center" />
+                                                        <TextBlock Grid.Column="5" Text="{Binding Flags}" FontSize="12" Classes="mono muted" VerticalAlignment="Center" />
+                                                    </Grid>
+                                                </DataTemplate>
+                                            </ListBox.ItemTemplate>
+                                        </ListBox>
+                                    </Grid>
+                                </TabItem>
+
+                                <!-- Trackers -->
+                                <TabItem Header="Trackers">
+                                    <Grid RowDefinitions="Auto,*">
+                                        <Grid Grid.Row="0" ColumnDefinitions="*,120,100,Auto" Margin="10,0,10,4">
+                                            <TextBlock Grid.Column="0" Text="URL" Classes="label" />
+                                            <TextBlock Grid.Column="1" Text="STATUS" Classes="label" />
+                                            <TextBlock Grid.Column="2" Text="NEXT" Classes="label" />
+                                            <Button Grid.Column="3" Classes="ghost" Padding="8,2" FontSize="11" Command="{Binding ReannounceCommand}" Margin="0,-6,0,0">
+                                                <TextBlock Text="Re-announce" FontSize="11" />
+                                            </Button>
+                                        </Grid>
+                                        <ListBox Grid.Row="1" Classes="table" ItemsSource="{Binding Trackers}">
+                                            <ListBox.ItemTemplate>
+                                                <DataTemplate x:DataType="vm:TrackerItemViewModel">
+                                                    <Grid ColumnDefinitions="*,120,100,Auto">
+                                                        <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                                                            <TextBlock Text="{Binding Url}" FontSize="12" Classes="mono" TextTrimming="CharacterEllipsis" />
+                                                            <TextBlock Text="{Binding Message}" FontSize="10" Classes="muted" TextTrimming="CharacterEllipsis"
+                                                                       IsVisible="{Binding Message, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                                                        </StackPanel>
+                                                        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                                                            <Ellipse Width="7" Height="7" Fill="{Binding StatusBrush}" />
+                                                            <TextBlock Text="{Binding Status}" FontSize="12" />
+                                                        </StackPanel>
+                                                        <TextBlock Grid.Column="2" Text="{Binding NextAnnounce}" FontSize="12" Classes="secondary" VerticalAlignment="Center" />
+                                                    </Grid>
+                                                </DataTemplate>
+                                            </ListBox.ItemTemplate>
+                                        </ListBox>
+                                    </Grid>
+                                </TabItem>
+                            </TabControl>
+                            </Panel>
+                        </Panel>
+                    </Border>
+                </Grid>
+            </Grid>
+
+            <!-- ============ Status bar ============ -->
+            <Grid Grid.Row="2" ColumnDefinitions="Auto,*,Auto" Margin="18,0,18,0">
+                <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="16" VerticalAlignment="Center">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                        <Ellipse Width="7" Height="7" Fill="{StaticResource Kraken.GreenBrush}" IsVisible="{Binding IsEngineReady}" Classes="pulse" />
+                        <Ellipse Width="7" Height="7" Fill="{StaticResource Kraken.AmberBrush}" IsVisible="{Binding !IsEngineReady}" />
+                        <TextBlock Text="{Binding ListenPortText}" Classes="muted" FontSize="11" />
+                    </StackPanel>
+                    <TextBlock Text="{Binding DhtStatusText}" Classes="muted" FontSize="11" />
+                    <TextBlock Text="{Binding ConnectionsText}" Classes="muted" FontSize="11" />
+                </StackPanel>
+                <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="14" VerticalAlignment="Center">
+                    <StackPanel Orientation="Horizontal" Spacing="5">
+                        <PathIcon Data="{StaticResource Icon.Down}" Width="11" Height="11" Foreground="{StaticResource Kraken.VioletLightBrush}" />
+                        <TextBlock Text="{Binding TotalDownloadRateText}" Classes="muted mono" FontSize="11" />
+                    </StackPanel>
+                    <StackPanel Orientation="Horizontal" Spacing="5">
+                        <PathIcon Data="{StaticResource Icon.Up}" Width="11" Height="11" Foreground="{StaticResource Kraken.CyanBrush}" />
+                        <TextBlock Text="{Binding TotalUploadRateText}" Classes="muted mono" FontSize="11" />
+                    </StackPanel>
+                </StackPanel>
+            </Grid>
+        </Grid>
+
+        <!-- ============ Toasts ============ -->
+        <ItemsControl Name="ToastHost" ItemsSource="{Binding Toasts}" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,20,44" Width="340">
+            <ItemsControl.ItemsPanel>
+                <ItemsPanelTemplate><StackPanel Spacing="8" /></ItemsPanelTemplate>
+            </ItemsControl.ItemsPanel>
+            <ItemsControl.ItemTemplate>
+                <DataTemplate x:DataType="vm:ToastViewModel">
+                    <Panel Classes="fadein">
+                    <Border CornerRadius="14" BoxShadow="0 10 30 0 #66000000" />
+                    <Border CornerRadius="14" Padding="14,12" Background="{StaticResource Kraken.GlassStrong}" BorderThickness="1"
+                            BorderBrush="{StaticResource Kraken.BorderStrongBrush}" Cursor="Hand">
+                        <Grid ColumnDefinitions="4,12,*,Auto">
+                            <Border Grid.Column="0" CornerRadius="2" Background="{StaticResource Kraken.VioletBrush}" IsVisible="{Binding !IsError}" />
+                            <Border Grid.Column="0" CornerRadius="2" Background="{StaticResource Kraken.RedBrush}" IsVisible="{Binding IsError}" />
+                            <StackPanel Grid.Column="2" Spacing="2">
+                                <TextBlock Text="{Binding Title}" FontWeight="SemiBold" FontSize="13" />
+                                <TextBlock Text="{Binding Message}" Classes="secondary" FontSize="12" TextWrapping="Wrap" IsVisible="{Binding HasMessage}" />
+                            </StackPanel>
+                            <Button Grid.Column="3" Classes="ghost icon" Width="24" Height="24" Padding="4" Command="{Binding DismissCommand}" VerticalAlignment="Top">
+                                <PathIcon Data="{StaticResource Icon.Close}" Width="10" Height="10" />
+                            </Button>
+                        </Grid>
+                    </Border>
+                    </Panel>
+                </DataTemplate>
+            </ItemsControl.ItemTemplate>
+        </ItemsControl>
+
+        <!-- ============ Drag & drop overlay ============ -->
+        <Border Name="DropOverlay" IsVisible="False" Background="#CC0A0712" IsHitTestVisible="False">
+            <Panel Margin="40">
+                <Border CornerRadius="24" BoxShadow="0 0 80 0 #668B5CF6" />
+                <Border CornerRadius="24" BorderBrush="{StaticResource Kraken.VioletBrush}" BorderThickness="2" Background="{StaticResource Kraken.VioletBrush10}">
+                <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" Spacing="12">
+                    <PathIcon Data="{StaticResource Icon.File}" Width="52" Height="52" Foreground="{StaticResource Kraken.VioletLightBrush}" />
+                    <TextBlock Text="Drop to add torrents" Classes="h1" HorizontalAlignment="Center" />
+                </StackPanel>
+                </Border>
+            </Panel>
+        </Border>
+    </Panel>
+</Window>

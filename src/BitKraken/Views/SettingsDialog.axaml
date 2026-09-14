@@ -1,0 +1,203 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:BitKraken.ViewModels"
+        xmlns:chrome="using:Avalonia.Controls.Chrome"
+        x:Class="BitKraken.Views.SettingsDialog"
+        x:DataType="vm:SettingsViewModel"
+        Title="Settings"
+        Width="620" Height="720"
+        CanResize="False"
+        WindowStartupLocation="CenterOwner"
+        WindowDecorations="None"
+        ExtendClientAreaToDecorationsHint="True"
+        ExtendClientAreaTitleBarHeightHint="-1"
+        TransparencyLevelHint="Transparent"
+        Background="Transparent">
+
+    <Window.Styles>
+        <Style Selector="TextBlock.section">
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Foreground" Value="{StaticResource Kraken.VioletLightBrush}" />
+            <Setter Property="LetterSpacing" Value="1.2" />
+            <Setter Property="Margin" Value="0,10,0,4" />
+        </Style>
+        <Style Selector="Border.row">
+            <Setter Property="Padding" Value="0,8" />
+            <Setter Property="BorderBrush" Value="{StaticResource Kraken.BorderBrush}" />
+            <Setter Property="BorderThickness" Value="0,0,0,1" />
+        </Style>
+        <Style Selector="TextBlock.hint">
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="Foreground" Value="{StaticResource Kraken.TextMutedBrush}" />
+            <Setter Property="TextWrapping" Value="Wrap" />
+        </Style>
+        <Style Selector="NumericUpDown">
+            <Setter Property="Width" Value="150" />
+            <Setter Property="MinHeight" Value="34" />
+            <Setter Property="FormatString" Value="0" />
+        </Style>
+    </Window.Styles>
+
+    <Panel Margin="16">
+    <Border CornerRadius="18" BoxShadow="0 20 60 0 #99000000, 0 0 0 1 #1AFFFFFF" />
+    <Border CornerRadius="18" Background="{StaticResource Kraken.GlassStrong}"
+            BorderBrush="{StaticResource Kraken.BorderStrongBrush}" BorderThickness="1">
+        <Grid RowDefinitions="Auto,*,Auto" Margin="24,18,24,22">
+
+            <Grid Grid.Row="0" ColumnDefinitions="Auto,*,Auto" chrome:WindowDecorationProperties.ElementRole="TitleBar" Background="Transparent">
+                <Panel Grid.Column="0" Width="34" Height="34" Margin="0,0,12,0">
+                    <Border CornerRadius="10" Background="{StaticResource Kraken.AccentGradient}" BoxShadow="0 0 20 0 #808B5CF6" />
+                    <PathIcon Data="{StaticResource Icon.Settings}" Width="18" Height="18" Foreground="White" />
+                </Panel>
+                <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                    <TextBlock Text="Settings" Classes="h2" />
+                    <TextBlock Text="Changes apply immediately after saving" Classes="muted" FontSize="12" />
+                </StackPanel>
+                <Button Grid.Column="2" Classes="ghost icon" Width="30" Height="30" Padding="6" Command="{Binding CancelCommand}">
+                    <PathIcon Data="{StaticResource Icon.Close}" Width="12" Height="12" />
+                </Button>
+            </Grid>
+
+            <ScrollViewer Grid.Row="1" Margin="0,10,0,10">
+                <StackPanel Margin="0,0,8,0">
+
+                    <TextBlock Text="DOWNLOADS" Classes="section" />
+                    <Border Classes="row">
+                        <StackPanel Spacing="6">
+                            <TextBlock Text="Download folder" />
+                            <Grid ColumnDefinitions="*,Auto">
+                                <TextBox Text="{Binding DownloadDirectory}" />
+                                <Button Grid.Column="1" Classes="ghost icon" Margin="6,0,0,0" Command="{Binding BrowseFolderCommand}">
+                                    <PathIcon Data="{StaticResource Icon.Folder}" Width="16" Height="16" />
+                                </Button>
+                            </Grid>
+                        </StackPanel>
+                    </Border>
+                    <Border Classes="row">
+                        <Grid ColumnDefinitions="*,Auto">
+                            <StackPanel>
+                                <TextBlock Text="Start torrents automatically" />
+                                <TextBlock Text="New torrents begin downloading as soon as they're added." Classes="hint" />
+                            </StackPanel>
+                            <ToggleSwitch Grid.Column="1" IsChecked="{Binding StartTorrentsAutomatically}" OnContent="" OffContent="" />
+                        </Grid>
+                    </Border>
+                    <Border Classes="row">
+                        <Grid ColumnDefinitions="*,Auto">
+                            <StackPanel>
+                                <TextBlock Text="Watch clipboard for magnet links" />
+                                <TextBlock Text="Offers to add magnet links you copy." Classes="hint" />
+                            </StackPanel>
+                            <ToggleSwitch Grid.Column="1" IsChecked="{Binding AutoStartMagnetFromClipboard}" OnContent="" OffContent="" />
+                        </Grid>
+                    </Border>
+
+                    <TextBlock Text="BANDWIDTH" Classes="section" />
+                    <Border Classes="row">
+                        <Grid ColumnDefinitions="*,Auto">
+                            <StackPanel>
+                                <TextBlock Text="Download limit (KiB/s)" />
+                                <TextBlock Text="0 = unlimited" Classes="hint" />
+                            </StackPanel>
+                            <NumericUpDown Grid.Column="1" Value="{Binding MaxDownloadRateKiB}" Minimum="0" Maximum="1000000" Increment="256" />
+                        </Grid>
+                    </Border>
+                    <Border Classes="row">
+                        <Grid ColumnDefinitions="*,Auto">
+                            <StackPanel>
+                                <TextBlock Text="Upload limit (KiB/s)" />
+                                <TextBlock Text="0 = unlimited" Classes="hint" />
+                            </StackPanel>
+                            <NumericUpDown Grid.Column="1" Value="{Binding MaxUploadRateKiB}" Minimum="0" Maximum="1000000" Increment="256" />
+                        </Grid>
+                    </Border>
+                    <Border Classes="row">
+                        <Grid ColumnDefinitions="*,Auto">
+                            <TextBlock Text="Maximum connections" VerticalAlignment="Center" />
+                            <NumericUpDown Grid.Column="1" Value="{Binding MaxConnections}" Minimum="10" Maximum="2000" Increment="10" />
+                        </Grid>
+                    </Border>
+
+                    <TextBlock Text="NETWORK" Classes="section" />
+                    <Border Classes="row">
+                        <Grid ColumnDefinitions="*,Auto">
+                            <StackPanel>
+                                <TextBlock Text="Listening port" />
+                                <TextBlock Text="Used for incoming peer connections and DHT. Requires restart to fully apply." Classes="hint" />
+                            </StackPanel>
+                            <NumericUpDown Grid.Column="1" Value="{Binding ListenPort}" Minimum="1024" Maximum="65535" Increment="1" />
+                        </Grid>
+                    </Border>
+                    <Border Classes="row">
+                        <Grid ColumnDefinitions="*,Auto">
+                            <StackPanel>
+                                <TextBlock Text="DHT (distributed hash table)" />
+                                <TextBlock Text="Find peers without a tracker." Classes="hint" />
+                            </StackPanel>
+                            <ToggleSwitch Grid.Column="1" IsChecked="{Binding EnableDht}" OnContent="" OffContent="" />
+                        </Grid>
+                    </Border>
+                    <Border Classes="row">
+                        <Grid ColumnDefinitions="*,Auto">
+                            <TextBlock Text="Peer exchange (PEX)" VerticalAlignment="Center" />
+                            <ToggleSwitch Grid.Column="1" IsChecked="{Binding EnablePex}" OnContent="" OffContent="" />
+                        </Grid>
+                    </Border>
+                    <Border Classes="row">
+                        <Grid ColumnDefinitions="*,Auto">
+                            <TextBlock Text="Local peer discovery" VerticalAlignment="Center" />
+                            <ToggleSwitch Grid.Column="1" IsChecked="{Binding EnableLocalPeerDiscovery}" OnContent="" OffContent="" />
+                        </Grid>
+                    </Border>
+                    <Border Classes="row">
+                        <Grid ColumnDefinitions="*,Auto">
+                            <StackPanel>
+                                <TextBlock Text="Port forwarding (UPnP / NAT-PMP)" />
+                                <TextBlock Text="Ask your router to open the listening port automatically." Classes="hint" />
+                            </StackPanel>
+                            <ToggleSwitch Grid.Column="1" IsChecked="{Binding EnablePortForwarding}" OnContent="" OffContent="" />
+                        </Grid>
+                    </Border>
+                    <Border Classes="row">
+                        <Grid ColumnDefinitions="*,Auto">
+                            <StackPanel>
+                                <TextBlock Text="Require encrypted connections" />
+                                <TextBlock Text="Only talk to peers that support protocol encryption. May reduce available peers." Classes="hint" />
+                            </StackPanel>
+                            <ToggleSwitch Grid.Column="1" IsChecked="{Binding RequireEncryption}" OnContent="" OffContent="" />
+                        </Grid>
+                    </Border>
+
+                    <TextBlock Text="APPEARANCE" Classes="section" />
+                    <Border Classes="row">
+                        <Grid ColumnDefinitions="*,Auto">
+                            <StackPanel>
+                                <TextBlock Text="Animated aurora background" />
+                                <TextBlock Text="Turn off to save a little CPU on older machines." Classes="hint" />
+                            </StackPanel>
+                            <ToggleSwitch Grid.Column="1" IsChecked="{Binding AnimatedBackground}" OnContent="" OffContent="" />
+                        </Grid>
+                    </Border>
+
+                    <TextBlock Text="DATA" Classes="section" />
+                    <Border Classes="row" BorderThickness="0">
+                        <Grid ColumnDefinitions="*,Auto">
+                            <StackPanel>
+                                <TextBlock Text="Application data" />
+                                <TextBlock Text="{Binding CacheDirectory}" Classes="hint" />
+                            </StackPanel>
+                            <Button Grid.Column="1" Classes="ghost" Content="Open folder" Command="{Binding OpenCacheFolderCommand}" VerticalAlignment="Center" />
+                        </Grid>
+                    </Border>
+                </StackPanel>
+            </ScrollViewer>
+
+            <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
+                <Button Content="Cancel" Command="{Binding CancelCommand}" />
+                <Button Classes="primary" Content="Save changes" Command="{Binding SaveCommand}" IsDefault="True" />
+            </StackPanel>
+        </Grid>
+    </Border>
+    </Panel>
+</Window>

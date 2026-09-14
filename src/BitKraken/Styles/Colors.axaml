@@ -1,0 +1,110 @@
+<ResourceDictionary xmlns="https://github.com/avaloniaui"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <!-- ===== Core palette: deep space purple ===== -->
+    <Color x:Key="Kraken.Bg0">#0A0712</Color>
+    <Color x:Key="Kraken.Bg1">#100C1B</Color>
+    <Color x:Key="Kraken.Bg2">#171226</Color>
+    <Color x:Key="Kraken.Bg3">#1F1833</Color>
+    <Color x:Key="Kraken.Bg4">#2A2145</Color>
+    <Color x:Key="Kraken.Border">#2C2347</Color>
+    <Color x:Key="Kraken.BorderStrong">#3D3160</Color>
+
+    <Color x:Key="Kraken.Violet">#8B5CF6</Color>
+    <Color x:Key="Kraken.VioletLight">#A78BFA</Color>
+    <Color x:Key="Kraken.VioletDark">#6D3FE0</Color>
+    <Color x:Key="Kraken.Magenta">#D946EF</Color>
+    <Color x:Key="Kraken.Pink">#EC4899</Color>
+    <Color x:Key="Kraken.Cyan">#22D3EE</Color>
+    <Color x:Key="Kraken.Green">#34D399</Color>
+    <Color x:Key="Kraken.Amber">#FBBF24</Color>
+    <Color x:Key="Kraken.Red">#F87171</Color>
+
+    <Color x:Key="Kraken.Text">#F1ECFF</Color>
+    <Color x:Key="Kraken.TextSecondary">#B4A9D6</Color>
+    <Color x:Key="Kraken.TextMuted">#7C7199</Color>
+
+    <!-- ===== Brushes ===== -->
+    <SolidColorBrush x:Key="Kraken.Bg0Brush" Color="{StaticResource Kraken.Bg0}" />
+    <SolidColorBrush x:Key="Kraken.Bg1Brush" Color="{StaticResource Kraken.Bg1}" />
+    <SolidColorBrush x:Key="Kraken.Bg2Brush" Color="{StaticResource Kraken.Bg2}" />
+    <SolidColorBrush x:Key="Kraken.Bg3Brush" Color="{StaticResource Kraken.Bg3}" />
+    <SolidColorBrush x:Key="Kraken.Bg4Brush" Color="{StaticResource Kraken.Bg4}" />
+    <SolidColorBrush x:Key="Kraken.BorderBrush" Color="{StaticResource Kraken.Border}" />
+    <SolidColorBrush x:Key="Kraken.BorderStrongBrush" Color="{StaticResource Kraken.BorderStrong}" />
+
+    <SolidColorBrush x:Key="Kraken.VioletBrush" Color="{StaticResource Kraken.Violet}" />
+    <SolidColorBrush x:Key="Kraken.VioletLightBrush" Color="{StaticResource Kraken.VioletLight}" />
+    <SolidColorBrush x:Key="Kraken.VioletDarkBrush" Color="{StaticResource Kraken.VioletDark}" />
+    <SolidColorBrush x:Key="Kraken.MagentaBrush" Color="{StaticResource Kraken.Magenta}" />
+    <SolidColorBrush x:Key="Kraken.PinkBrush" Color="{StaticResource Kraken.Pink}" />
+    <SolidColorBrush x:Key="Kraken.CyanBrush" Color="{StaticResource Kraken.Cyan}" />
+    <SolidColorBrush x:Key="Kraken.GreenBrush" Color="{StaticResource Kraken.Green}" />
+    <SolidColorBrush x:Key="Kraken.AmberBrush" Color="{StaticResource Kraken.Amber}" />
+    <SolidColorBrush x:Key="Kraken.RedBrush" Color="{StaticResource Kraken.Red}" />
+
+    <SolidColorBrush x:Key="Kraken.TextBrush" Color="{StaticResource Kraken.Text}" />
+    <SolidColorBrush x:Key="Kraken.TextSecondaryBrush" Color="{StaticResource Kraken.TextSecondary}" />
+    <SolidColorBrush x:Key="Kraken.TextMutedBrush" Color="{StaticResource Kraken.TextMuted}" />
+
+    <SolidColorBrush x:Key="Kraken.VioletBrush10" Color="#1A8B5CF6" />
+    <SolidColorBrush x:Key="Kraken.VioletBrush20" Color="#338B5CF6" />
+    <SolidColorBrush x:Key="Kraken.VioletBrush40" Color="#668B5CF6" />
+    <SolidColorBrush x:Key="Kraken.WhiteBrush05" Color="#0DFFFFFF" />
+    <SolidColorBrush x:Key="Kraken.WhiteBrush10" Color="#1AFFFFFF" />
+    <SolidColorBrush x:Key="Kraken.Glass" Color="#B3140F22" />
+    <SolidColorBrush x:Key="Kraken.GlassStrong" Color="#E6120D1F" />
+
+    <LinearGradientBrush x:Key="Kraken.AccentGradient" StartPoint="0%,0%" EndPoint="100%,0%">
+        <GradientStop Offset="0" Color="{StaticResource Kraken.VioletDark}" />
+        <GradientStop Offset="0.55" Color="{StaticResource Kraken.Violet}" />
+        <GradientStop Offset="1" Color="{StaticResource Kraken.Magenta}" />
+    </LinearGradientBrush>
+
+    <LinearGradientBrush x:Key="Kraken.SeedGradient" StartPoint="0%,0%" EndPoint="100%,0%">
+        <GradientStop Offset="0" Color="#0E9F8A" />
+        <GradientStop Offset="1" Color="{StaticResource Kraken.Cyan}" />
+    </LinearGradientBrush>
+
+    <LinearGradientBrush x:Key="Kraken.TextGradient" StartPoint="0%,0%" EndPoint="100%,0%">
+        <GradientStop Offset="0" Color="{StaticResource Kraken.VioletLight}" />
+        <GradientStop Offset="1" Color="{StaticResource Kraken.Magenta}" />
+    </LinearGradientBrush>
+
+    <LinearGradientBrush x:Key="Kraken.CardGradient" StartPoint="0%,0%" EndPoint="100%,100%">
+        <GradientStop Offset="0" Color="#1A1430" />
+        <GradientStop Offset="1" Color="#140F22" />
+    </LinearGradientBrush>
+
+    <LinearGradientBrush x:Key="Kraken.WindowGradient" StartPoint="0%,0%" EndPoint="100%,100%">
+        <GradientStop Offset="0" Color="#0E0A19" />
+        <GradientStop Offset="1" Color="#0A0712" />
+    </LinearGradientBrush>
+
+    <!-- Kraken logo geometry: a stylised octopus head with four tentacles -->
+    <StreamGeometry x:Key="Kraken.LogoGeometry">M12 2C7.58 2 4 5.36 4 9.5c0 2.03.85 3.87 2.24 5.21-.5.86-1.31 1.5-2.24 1.79-.65.2-.6 1.16.08 1.27 1.4.22 2.83-.26 3.84-1.27.72.37 1.5.62 2.32.75-.16.9-.72 1.66-1.53 2.06-.6.29-.36 1.2.31 1.19 1.63-.03 3.05-1.05 3.62-2.52.18.01.36.02.54.02.11 0 .22 0 .33-.01.57 1.47 1.98 2.48 3.6 2.51.67.01.91-.9.31-1.19-.81-.4-1.36-1.15-1.52-2.05.82-.14 1.6-.4 2.32-.77 1.01 1.02 2.44 1.5 3.84 1.28.68-.11.73-1.07.08-1.27-.93-.29-1.74-.93-2.24-1.79A7.02 7.02 0 0 0 20 9.5C20 5.36 16.42 2 12 2zm-3 6.5a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3zm6 0a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3z</StreamGeometry>
+
+    <!-- Icon geometries (24x24 grid, Material-style) -->
+    <StreamGeometry x:Key="Icon.Add">M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z</StreamGeometry>
+    <StreamGeometry x:Key="Icon.Magnet">M3 7v6a9 9 0 0 0 18 0V7h-4v6a5 5 0 0 1-10 0V7H3zm0-4h4v3H3V3zm14 0h4v3h-4V3z</StreamGeometry>
+    <StreamGeometry x:Key="Icon.Play">M8 5v14l11-7z</StreamGeometry>
+    <StreamGeometry x:Key="Icon.Pause">M6 19h4V5H6v14zm8-14v14h4V5h-4z</StreamGeometry>
+    <StreamGeometry x:Key="Icon.Delete">M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z</StreamGeometry>
+    <StreamGeometry x:Key="Icon.Settings">M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.488.488 0 0 0-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.484.484 0 0 0-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z</StreamGeometry>
+    <StreamGeometry x:Key="Icon.Search">M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z</StreamGeometry>
+    <StreamGeometry x:Key="Icon.Down">M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z</StreamGeometry>
+    <StreamGeometry x:Key="Icon.Up">M5 4v2h14V4H5zm0 10h4v6h6v-6h4l-7-7-7 7z</StreamGeometry>
+    <StreamGeometry x:Key="Icon.Close">M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z</StreamGeometry>
+    <StreamGeometry x:Key="Icon.Minimize">M6 19h12v2H6z</StreamGeometry>
+    <StreamGeometry x:Key="Icon.Maximize">M4 4h16v16H4V4zm2 4v10h12V8H6z</StreamGeometry>
+    <StreamGeometry x:Key="Icon.Folder">M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z</StreamGeometry>
+    <StreamGeometry x:Key="Icon.File">M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z</StreamGeometry>
+    <StreamGeometry x:Key="Icon.All">M4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6zm16-4H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z</StreamGeometry>
+    <StreamGeometry x:Key="Icon.Check">M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z</StreamGeometry>
+    <StreamGeometry x:Key="Icon.Seed">M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z</StreamGeometry>
+    <StreamGeometry x:Key="Icon.Refresh">M17.65 6.35A7.958 7.958 0 0 0 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08A5.99 5.99 0 0 1 12 18c-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z</StreamGeometry>
+    <StreamGeometry x:Key="Icon.Peers">M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z</StreamGeometry>
+    <StreamGeometry x:Key="Icon.Warning">M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z</StreamGeometry>
+    <StreamGeometry x:Key="Icon.Clipboard">M19 2h-4.18C14.4.84 13.3 0 12 0c-1.3 0-2.4.84-2.82 2H5c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-7 0c.55 0 1 .45 1 1s-.45 1-1 1-1-.45-1-1 .45-1 1-1zm7 18H5V4h2v3h10V4h2v16z</StreamGeometry>
+    <StreamGeometry x:Key="Icon.Link">M3.9 12c0-1.71 1.39-3.1 3.1-3.1h4V7H7c-2.76 0-5 2.24-5 5s2.24 5 5 5h4v-1.9H7c-1.71 0-3.1-1.39-3.1-3.1zM8 13h8v-2H8v2zm9-6h-4v1.9h4c1.71 0 3.1 1.39 3.1 3.1s-1.39 3.1-3.1 3.1h-4V17h4c2.76 0 5-2.24 5-5s-2.24-5-5-5z</StreamGeometry>
+</ResourceDictionary>

@@ -1,0 +1,41 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:chrome="using:Avalonia.Controls.Chrome"
+        x:Class="BitKraken.Views.RemoveDialog"
+        Title="Remove torrent"
+        Width="460" SizeToContent="Height"
+        CanResize="False"
+        WindowStartupLocation="CenterOwner"
+        WindowDecorations="None"
+        ExtendClientAreaToDecorationsHint="True"
+        ExtendClientAreaTitleBarHeightHint="-1"
+        TransparencyLevelHint="Transparent"
+        Background="Transparent">
+
+    <Panel Margin="16">
+    <Border CornerRadius="18" BoxShadow="0 20 60 0 #99000000, 0 0 0 1 #1AFFFFFF" />
+    <Border CornerRadius="18" Background="{StaticResource Kraken.GlassStrong}"
+            BorderBrush="{StaticResource Kraken.BorderStrongBrush}" BorderThickness="1">
+        <StackPanel Spacing="16" Margin="24,18,24,22">
+            <Grid ColumnDefinitions="Auto,*" chrome:WindowDecorationProperties.ElementRole="TitleBar" Background="Transparent">
+                <Border Grid.Column="0" Width="34" Height="34" CornerRadius="10" Background="#33F87171" Margin="0,0,12,0">
+                    <PathIcon Data="{StaticResource Icon.Delete}" Width="18" Height="18" Foreground="{StaticResource Kraken.RedBrush}" />
+                </Border>
+                <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                    <TextBlock Name="TitleText" Text="Remove torrent?" Classes="h2" />
+                    <TextBlock Name="NameText" Classes="muted" FontSize="12" TextTrimming="CharacterEllipsis" />
+                </StackPanel>
+            </Grid>
+
+            <Border Background="{StaticResource Kraken.Bg1Brush}" CornerRadius="12" Padding="14,12" BorderBrush="{StaticResource Kraken.BorderBrush}" BorderThickness="1">
+                <CheckBox Name="DeleteFilesBox" Content="Also delete downloaded files from disk" />
+            </Border>
+
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
+                <Button Name="CancelButton" Content="Cancel" />
+                <Button Name="RemoveButton" Classes="primary" Content="Remove" IsDefault="True" Background="{StaticResource Kraken.RedBrush}" />
+            </StackPanel>
+        </StackPanel>
+    </Border>
+    </Panel>
+</Window>
