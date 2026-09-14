@@ -38,6 +38,25 @@ On Windows: `.\scripts\publish.ps1 -Rids win-x64`. Output lands in `publish/<rid
 
 Supported RIDs: `win-x64`, `win-arm64`, `linux-x64`, `linux-arm64`, `osx-x64`, `osx-arm64`.
 
+## macOS installer (Apple Silicon)
+
+```bash
+scripts/package-macos.sh osx-arm64 1.0.0
+```
+
+produces `dist/BitKraken-<version>-osx-arm64.dmg` (drag-to-Applications) and `.pkg` (installer), built from a proper
+`BitKraken.app` bundle that registers the `.torrent` file type and `magnet:` URL scheme.
+
+The [macOS installer workflow](.github/workflows/macos-installer.yml) runs the same script on an Apple Silicon runner:
+
+- **Tag push** `v1.2.3` → builds, uploads artifacts and attaches the `.dmg`/`.pkg` to a GitHub release.
+- **Run workflow** (manual) → builds with the version you enter and uploads artifacts.
+
+Packages are ad-hoc signed unless you add these repository secrets, in which case they are Developer ID signed and
+notarized: `MACOS_CERTIFICATE_P12` (base64 `.p12`), `MACOS_CERTIFICATE_PASSWORD`, `MACOS_SIGNING_IDENTITY`
+(`Developer ID Application: …`), `MACOS_INSTALLER_IDENTITY` (`Developer ID Installer: …`), `APPLE_ID`,
+`APPLE_TEAM_ID`, `APPLE_APP_PASSWORD` (app-specific password).
+
 ## Where data lives
 
 | What | Location |
