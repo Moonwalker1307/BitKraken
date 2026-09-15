@@ -22,6 +22,12 @@ public sealed class AppSettings
     public bool EnablePortForwarding { get; set; } = true;
     public bool RequireEncryption { get; set; }
 
+    /// <summary>
+    /// Append a small set of well-known public trackers to public torrents as they're added.
+    /// Usually the biggest cut to time-to-first-peer for magnets. Never applied to private torrents.
+    /// </summary>
+    public bool AddFallbackTrackers { get; set; } = true;
+
     public bool StartTorrentsAutomatically { get; set; } = true;
     public bool AutoStartMagnetFromClipboard { get; set; } = true;
 

@@ -14,6 +14,9 @@ public sealed partial class TorrentItemViewModel : ViewModelBase
 {
     private const int HistoryLength = 90;
 
+    /// <summary>Upper bound on a manual re-announce so one dead tracker can't hang the command.</summary>
+    private static readonly TimeSpan ReannounceTimeout = TimeSpan.FromSeconds(20);
+
     private static readonly IBrush DownloadingBrush = new SolidColorBrush(Color.Parse("#A78BFA"));
     private static readonly IBrush SeedingBrush = new SolidColorBrush(Color.Parse("#22D3EE"));
     private static readonly IBrush PausedBrush = new SolidColorBrush(Color.Parse("#7C7199"));
@@ -321,7 +324,10 @@ public sealed partial class TorrentItemViewModel : ViewModelBase
     [RelayCommand]
     private async Task Reannounce()
     {
-        try { await Manager.TrackerManager.AnnounceAsync(CancellationToken.None); }
+        // The parameterless overload honours the tracker's MinUpdateInterval, so it silently does
+        // nothing when pressed shortly after the last announce. Passing an explicit event forces it.
+        using var cts = new CancellationTokenSource(ReannounceTimeout);
+        try { await Manager.TrackerManager.AnnounceAsync(TorrentEvent.Started, cts.Token); }
         catch { /* tracker errors surface in the tracker tab */ }
     }
 

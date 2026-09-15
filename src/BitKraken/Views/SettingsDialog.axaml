@@ -155,6 +155,15 @@
                     </Border>
                     <Border Classes="row">
                         <Grid ColumnDefinitions="*,Auto">
+                            <StackPanel>
+                                <TextBlock Text="Add public trackers" />
+                                <TextBlock Text="Query extra open trackers to find peers sooner. Never applied to private torrents." Classes="hint" />
+                            </StackPanel>
+                            <ToggleSwitch Grid.Column="1" IsChecked="{Binding AddFallbackTrackers}" OnContent="" OffContent="" />
+                        </Grid>
+                    </Border>
+                    <Border Classes="row">
+                        <Grid ColumnDefinitions="*,Auto">
                             <TextBlock Text="Local peer discovery" VerticalAlignment="Center" />
                             <ToggleSwitch Grid.Column="1" IsChecked="{Binding EnableLocalPeerDiscovery}" OnContent="" OffContent="" />
                         </Grid>
