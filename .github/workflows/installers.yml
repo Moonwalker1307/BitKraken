@@ -1,0 +1,183 @@
+name: Installers (macOS, Windows, Linux)
+
+on:
+  pull_request:
+    branches: [main, master]
+  push:
+    branches: [main, master]
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version override (e.g. 1.2.0). Leave empty to auto-increment 1.0.x"
+        required: false
+        default: ""
+
+# One build per PR / branch; superseded preview builds are cancelled, release builds are not.
+concurrency:
+  group: installers-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: write
+
+jobs:
+  # Resolved once so every platform in the matrix stamps the same version.
+  # Pull request      -> 1.0.x-preview (next patch, not released)
+  # Merge to main     -> 1.0.x         (next patch, tagged and released)
+  # Tag push v1.2.3   -> 1.2.3
+  # Manual dispatch   -> the version entered, else the next patch
+  version:
+    name: Resolve version
+    runs-on: ubuntu-latest
+    outputs:
+      value: ${{ steps.version.outputs.value }}
+      channel: ${{ steps.version.outputs.channel }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # release tags drive the version counter
+
+      - id: version
+        env:
+          INPUT_VERSION: ${{ github.event.inputs.version }}
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            version="${GITHUB_REF#refs/tags/v}"
+            channel="tag"
+          elif [[ -n "${INPUT_VERSION}" ]]; then
+            version="${INPUT_VERSION#v}"
+            channel="manual"
+          elif [[ "${GITHUB_EVENT_NAME}" == "pull_request" ]]; then
+            version="$(scripts/next-version.sh preview)"
+            channel="preview"
+          else
+            version="$(scripts/next-version.sh release)"
+            channel="release"
+          fi
+          echo "value=$version" >> "$GITHUB_OUTPUT"
+          echo "channel=$channel" >> "$GITHUB_OUTPUT"
+          echo "### BitKraken $version ($channel build)" >> "$GITHUB_STEP_SUMMARY"
+
+  package:
+    name: ${{ matrix.name }}
+    needs: version
+    runs-on: ${{ matrix.runs-on }}
+    defaults:
+      run:
+        shell: bash # git bash on the Windows runner, so one script serves every platform
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS (Apple Silicon)
+            runs-on: macos-latest
+            rid: osx-arm64
+          - name: Windows (x64)
+            runs-on: windows-latest
+            rid: win-x64
+          - name: Windows (arm64)
+            runs-on: windows-latest
+            rid: win-arm64
+          - name: Linux (x64)
+            runs-on: ubuntu-latest
+            rid: linux-x64
+          - name: Linux (arm64)
+            runs-on: ubuntu-latest
+            rid: linux-arm64
+
+    env:
+      VERSION: ${{ needs.version.outputs.value }}
+      # Optional macOS code-signing / notarization. Leave the secrets unset to produce ad-hoc signed packages.
+      MACOS_CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
+      MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+      MACOS_SIGNING_IDENTITY: ${{ secrets.MACOS_SIGNING_IDENTITY }}
+      MACOS_INSTALLER_IDENTITY: ${{ secrets.MACOS_INSTALLER_IDENTITY }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Import signing certificate
+        if: startsWith(matrix.rid, 'osx-') && env.MACOS_CERTIFICATE_P12 != ''
+        run: |
+          KEYCHAIN="$RUNNER_TEMP/signing.keychain-db"
+          echo "$MACOS_CERTIFICATE_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security create-keychain -p actions "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p actions "$KEYCHAIN"
+          security import "$RUNNER_TEMP/cert.p12" -P "$MACOS_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN"
+          security set-key-partition-list -S apple-tool:,apple: -s -k actions "$KEYCHAIN"
+          security list-keychains -d user -s "$KEYCHAIN" login.keychain-db
+          echo "SIGNING_IDENTITY=$MACOS_SIGNING_IDENTITY" >> "$GITHUB_ENV"
+          echo "INSTALLER_IDENTITY=$MACOS_INSTALLER_IDENTITY" >> "$GITHUB_ENV"
+
+      # macOS gets a real .app bundle plus .dmg/.pkg installers; the other platforms get a
+      # self-contained single-file build archived as .zip (Windows) or .tar.gz (Linux).
+      - name: Build app bundle, DMG and PKG
+        if: startsWith(matrix.rid, 'osx-')
+        run: scripts/package-macos.sh "${{ matrix.rid }}" "$VERSION"
+
+      - name: Build portable package
+        if: ${{ !startsWith(matrix.rid, 'osx-') }}
+        run: scripts/package-portable.sh "${{ matrix.rid }}" "$VERSION"
+
+      - name: Notarize
+        if: startsWith(matrix.rid, 'osx-') && env.MACOS_CERTIFICATE_P12 != '' && env.APPLE_ID != '' && needs.version.outputs.channel != 'preview'
+        run: |
+          for f in dist/*.dmg dist/*.pkg; do
+            xcrun notarytool submit "$f" --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_PASSWORD" --wait
+            xcrun stapler staple "$f"
+          done
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: BitKraken-${{ needs.version.outputs.value }}-${{ matrix.rid }}
+          path: |
+            dist/*.dmg
+            dist/*.pkg
+            dist/*.zip
+            dist/*.tar.gz
+          if-no-files-found: error
+
+  # Merges to main/master and tag pushes publish a GitHub Release (visible in the repo's
+  # "Releases" panel, tagged v1.0.x); preview builds stay workflow artifacts only.
+  release:
+    name: Publish release
+    needs: [version, package]
+    if: needs.version.outputs.channel == 'release' || needs.version.outputs.channel == 'tag'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download every platform's packages
+        uses: actions/download-artifact@v4
+        with:
+          pattern: BitKraken-${{ needs.version.outputs.value }}-*
+          path: dist
+          merge-multiple: true
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ needs.version.outputs.value }}
+          name: BitKraken ${{ needs.version.outputs.value }}
+          target_commitish: ${{ github.sha }}
+          draft: false
+          prerelease: false
+          make_latest: true
+          files: dist/*
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+
+      - name: Link the release in the run summary
+        run: |
+          echo "Published [BitKraken ${{ needs.version.outputs.value }}](${{ github.server_url }}/${{ github.repository }}/releases/tag/v${{ needs.version.outputs.value }})" >> "$GITHUB_STEP_SUMMARY"
+          ls -la dist >> "$GITHUB_STEP_SUMMARY"

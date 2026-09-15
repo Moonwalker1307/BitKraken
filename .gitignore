@@ -467,4 +467,7 @@ $RECYCLE.BIN/
 # Windows shortcuts
 *.lnk
 
-# End of https://www.toptal.com/developers/gitignore/api/macos,windows,linux,csharpdist/
+# End of https://www.toptal.com/developers/gitignore/api/macos,windows,linux,csharp
+
+# Packaged installers and archives
+dist/
