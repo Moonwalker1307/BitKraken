@@ -92,6 +92,15 @@
                             <ToggleSwitch Grid.Column="1" IsChecked="{Binding AutoStartMagnetFromClipboard}" OnContent="" OffContent="" />
                         </Grid>
                     </Border>
+                    <Border Classes="row">
+                        <Grid ColumnDefinitions="*,Auto">
+                            <StackPanel>
+                                <TextBlock Text="Open magnet links from the browser" />
+                                <TextBlock Text="Makes BitKraken the handler for magnet links and .torrent files." Classes="hint" />
+                            </StackPanel>
+                            <ToggleSwitch Grid.Column="1" IsChecked="{Binding HandleMagnetLinks}" OnContent="" OffContent="" />
+                        </Grid>
+                    </Border>
 
                     <TextBlock Text="BANDWIDTH" Classes="section" />
                     <Border Classes="row">

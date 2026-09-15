@@ -25,6 +25,9 @@ public sealed class AppSettings
     public bool StartTorrentsAutomatically { get; set; } = true;
     public bool AutoStartMagnetFromClipboard { get; set; } = true;
 
+    /// <summary>Register BitKraken with the desktop as the handler for magnet links and .torrent files.</summary>
+    public bool HandleMagnetLinks { get; set; } = true;
+
     /// <summary>Enable the animated aurora background. Can be turned off on low-end machines.</summary>
     public bool AnimatedBackground { get; set; } = true;
 

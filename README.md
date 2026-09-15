@@ -8,14 +8,31 @@ real-time transfer graphs.
 
 ## Features
 
-- **Torrents & magnets** — open `.torrent` files, paste magnet links, drag-and-drop onto the window, or pass them
-  on the command line (`BitKraken file.torrent` / `BitKraken "magnet:?..."`).
+- **Torrents & magnets** — open `.torrent` files, paste magnet links, drag-and-drop onto the window, click a magnet
+  link in your browser, or pass them on the command line (`BitKraken file.torrent` / `BitKraken "magnet:?..."`).
 - **Clipboard watch** — copies a magnet link? BitKraken offers to add it (toggle in Settings).
 - **Full engine** — DHT, PEX, local peer discovery, UPnP/NAT-PMP port forwarding, protocol encryption,
   per-file priorities, global rate limits, fast-resume and session restore.
 - **Details panel** — overview (piece map + speed graph + stats), files (priority / skip), peers, trackers.
 - **Filters & search** — All / Downloading / Seeding / Completed / Paused / Errors, plus instant name search.
 - **Keyboard** — `Ctrl/⌘+O` add file, `Ctrl/⌘+M` add magnet, `Ctrl/⌘+,` settings, `Delete` remove.
+
+## Magnet links from your browser
+
+Clicking a magnet link on a torrent site hands it straight to BitKraken: the window comes forward and the torrent is
+added (queued if the engine is still starting up). A second launch never starts a second engine — it passes its
+arguments to the instance that is already running and exits.
+
+Each desktop delivers the link differently, and BitKraken registers itself for all three:
+
+| Platform | How it's wired up |
+| --- | --- |
+| macOS | The `BitKraken.app` bundle declares the `magnet:` scheme, and macOS delivers the link as a URL event — it never appears on the command line. Use the packaged app (see below), not the bare binary. |
+| Windows | `HKCU\Software\Classes\magnet` is pointed at the running executable on startup. |
+| Linux | `~/.local/share/applications/bitkraken.desktop` is written with `x-scheme-handler/magnet` and made the default with `xdg-mime`. |
+
+Turning **Settings → Open magnet links from the browser** off removes the association again (on Windows and Linux;
+on macOS it belongs to the bundle). Move or re-install the app and the association follows it on the next start.
 
 ## Requirements
 
