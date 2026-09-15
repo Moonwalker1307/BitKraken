@@ -25,6 +25,7 @@ public sealed partial class SettingsViewModel : ViewModelBase
         _requireEncryption = settings.RequireEncryption;
         _startTorrentsAutomatically = settings.StartTorrentsAutomatically;
         _autoStartMagnetFromClipboard = settings.AutoStartMagnetFromClipboard;
+        _handleMagnetLinks = settings.HandleMagnetLinks;
         _animatedBackground = settings.AnimatedBackground;
     }
 
@@ -40,6 +41,7 @@ public sealed partial class SettingsViewModel : ViewModelBase
     [ObservableProperty] private bool _requireEncryption;
     [ObservableProperty] private bool _startTorrentsAutomatically;
     [ObservableProperty] private bool _autoStartMagnetFromClipboard;
+    [ObservableProperty] private bool _handleMagnetLinks;
     [ObservableProperty] private bool _animatedBackground;
 
     public string CacheDirectory => SettingsService.AppDataDirectory;
@@ -60,6 +62,7 @@ public sealed partial class SettingsViewModel : ViewModelBase
         RequireEncryption = RequireEncryption,
         StartTorrentsAutomatically = StartTorrentsAutomatically,
         AutoStartMagnetFromClipboard = AutoStartMagnetFromClipboard,
+        HandleMagnetLinks = HandleMagnetLinks,
         AnimatedBackground = AnimatedBackground,
     };
 
