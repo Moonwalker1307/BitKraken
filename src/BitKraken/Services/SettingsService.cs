@@ -21,20 +21,36 @@ public sealed class SettingsService
     public static string EngineStatePath { get; } = Path.Combine(AppDataDirectory, "engine-state.dat");
     public static string SettingsPath { get; } = Path.Combine(AppDataDirectory, "settings.json");
 
+    private readonly string _directory;
+    private readonly string _cacheDirectory;
+    private readonly string _settingsPath;
+
+    public SettingsService() : this(AppDataDirectory)
+    {
+    }
+
+    /// <summary>Reads and writes under <paramref name="directory"/> instead of the real user profile. For tests.</summary>
+    internal SettingsService(string directory)
+    {
+        _directory = directory;
+        _cacheDirectory = Path.Combine(directory, "cache");
+        _settingsPath = Path.Combine(directory, "settings.json");
+    }
+
     public AppSettings Current { get; private set; } = new();
 
     public event EventHandler? Changed;
 
     public void Load()
     {
-        Directory.CreateDirectory(AppDataDirectory);
-        Directory.CreateDirectory(CacheDirectory);
+        Directory.CreateDirectory(_directory);
+        Directory.CreateDirectory(_cacheDirectory);
 
         try
         {
-            if (File.Exists(SettingsPath))
+            if (File.Exists(_settingsPath))
             {
-                Current = JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(SettingsPath), JsonOptions) ?? new AppSettings();
+                Current = JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(_settingsPath), JsonOptions) ?? new AppSettings();
             }
         }
         catch
@@ -49,10 +65,10 @@ public sealed class SettingsService
     public async Task SaveAsync(AppSettings settings)
     {
         Current = settings;
-        Directory.CreateDirectory(AppDataDirectory);
+        Directory.CreateDirectory(_directory);
         Directory.CreateDirectory(settings.DownloadDirectory);
 
-        await using var stream = File.Create(SettingsPath);
+        await using var stream = File.Create(_settingsPath);
         await JsonSerializer.SerializeAsync(stream, settings, JsonOptions);
 
         Changed?.Invoke(this, EventArgs.Empty);

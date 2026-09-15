@@ -44,6 +44,17 @@ on macOS it belongs to the bundle). Move or re-install the app and the associati
 dotnet run --project src/BitKraken
 ```
 
+## Tests
+
+```bash
+dotnet test tests/BitKraken.Tests
+```
+
+Unit tests cover the pure logic: display formatting, settings persistence (including the fallback
+when `settings.json` is corrupt and the defaults an older build never wrote), the shell-argument
+normalization behind magnet links, and the tag arithmetic in `scripts/next-version.sh`. They run on
+every push, and a red run blocks the installer build.
+
 ## Publish self-contained binaries
 
 ```bash
@@ -122,6 +133,7 @@ src/BitKraken/
   Views/         MainWindow + Add / Settings / Remove dialogs (Avalonia XAML)
   Styles/        Colors.axaml (palette, icons) and Theme.axaml (control styles, animations)
   Diagnostics/   Env-var driven dev hooks (headless screenshots)
+tests/BitKraken.Tests/   xUnit tests for the logic that does not need a window
 ```
 
 ### Developer hooks
