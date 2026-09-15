@@ -12,6 +12,10 @@ set -euo pipefail
 RID="${1:-osx-arm64}"
 VERSION="${2:-${VERSION:-1.0.0}}"
 VERSION="${VERSION#v}"
+# CFBundleVersion/CFBundleShortVersionString and pkgbuild only accept numeric x.y.z, so a
+# pre-release build (1.0.3-preview) keeps the full string for file names and .NET metadata
+# but stamps the numeric core into the bundle.
+VERSION_CORE="${VERSION%%-*}"
 APP_NAME="BitKraken"
 BUNDLE_ID="com.thorstholm.bitkraken"
 
@@ -31,7 +35,7 @@ dotnet publish "$ROOT/src/BitKraken/BitKraken.csproj" \
 echo "==> Assembling $APP_NAME.app"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp -R "$OUT"/. "$APP/Contents/MacOS/"
-sed "s/__VERSION__/$VERSION/g" "$ROOT/packaging/macos/Info.plist" > "$APP/Contents/Info.plist"
+sed "s/__VERSION__/$VERSION_CORE/g" "$ROOT/packaging/macos/Info.plist" > "$APP/Contents/Info.plist"
 echo -n "APPL????" > "$APP/Contents/PkgInfo"
 
 # Icon: build an .icns from the 512px PNG
@@ -68,7 +72,7 @@ hdiutil create -volname "$APP_NAME" -srcfolder "$DMG_ROOT" -ov -format UDZO "$DM
 
 echo "==> Creating $PKG"
 rm -f "$PKG"
-PKG_ARGS=(--component "$APP" --install-location /Applications --identifier "$BUNDLE_ID" --version "$VERSION")
+PKG_ARGS=(--component "$APP" --install-location /Applications --identifier "$BUNDLE_ID" --version "$VERSION_CORE")
 if [ -n "${INSTALLER_IDENTITY:-}" ]; then
   PKG_ARGS+=(--sign "$INSTALLER_IDENTITY")
 fi
