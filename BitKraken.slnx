@@ -2,4 +2,7 @@
   <Folder Name="/src/">
     <Project Path="src/BitKraken/BitKraken.csproj" />
   </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/BitKraken.Tests/BitKraken.Tests.csproj" />
+  </Folder>
 </Solution>

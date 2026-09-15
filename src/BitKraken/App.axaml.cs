@@ -141,7 +141,7 @@ public partial class App : Application
     }
 
     /// <summary>Turns what the shell handed us into a magnet link or a torrent path, or null if it is neither.</summary>
-    private static string? NormalizeSource(string source)
+    internal static string? NormalizeSource(string source)
     {
         if (source.StartsWith("magnet:", StringComparison.OrdinalIgnoreCase)) return source;
 

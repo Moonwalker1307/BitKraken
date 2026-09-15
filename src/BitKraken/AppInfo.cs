@@ -18,15 +18,20 @@ public static class AppInfo
     {
         var assembly = typeof(AppInfo).Assembly;
 
-        // InformationalVersion is the full string the build stamped, pre-release suffix included;
-        // the SDK can append "+<commit>" build metadata, which is noise in the UI.
+        // InformationalVersion is the full string the build stamped, pre-release suffix included.
         var informational = assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
-        if (!string.IsNullOrWhiteSpace(informational))
-        {
-            var metadata = informational.IndexOf('+');
-            return metadata >= 0 ? informational[..metadata] : informational;
-        }
+        if (!string.IsNullOrWhiteSpace(informational)) return TrimBuildMetadata(informational);
 
         return assembly.GetName().Version?.ToString(3) ?? "0.0.0";
+    }
+
+    /// <summary>
+    /// Drops the "+&lt;commit&gt;" build metadata the SDK can append to an informational version, which is
+    /// noise in the UI. The pre-release suffix ("-preview") is part of the version and is kept.
+    /// </summary>
+    internal static string TrimBuildMetadata(string informational)
+    {
+        var metadata = informational.IndexOf('+');
+        return metadata >= 0 ? informational[..metadata] : informational;
     }
 }

@@ -59,9 +59,22 @@ jobs:
           echo "channel=$channel" >> "$GITHUB_OUTPUT"
           echo "### BitKraken $version ($channel build)" >> "$GITHUB_STEP_SUMMARY"
 
+  # A red test run must not produce an installer, let alone a release.
+  test:
+    name: Unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - run: dotnet test tests/BitKraken.Tests/BitKraken.Tests.csproj --configuration Release --logger "console;verbosity=normal"
+
   package:
     name: ${{ matrix.name }}
-    needs: version
+    needs: [version, test]
     runs-on: ${{ matrix.runs-on }}
     defaults:
       run:

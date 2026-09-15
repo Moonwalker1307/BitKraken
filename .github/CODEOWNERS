@@ -1,0 +1,10 @@
+# Code owners for BitKraken.
+#
+# Whoever is listed here is requested for review automatically on every pull
+# request that touches a matching path. The last matching rule wins, so a more
+# specific path below would override the catch-all.
+#
+# This only *requests* review. To make it a merge requirement, turn on
+# "Require review from Code Owners" in the branch protection rules for main.
+
+*   @Moonwalker1307
