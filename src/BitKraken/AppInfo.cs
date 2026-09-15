@@ -5,6 +5,9 @@ namespace BitKraken;
 /// <summary>Version of the running build, read from the assembly the packaging scripts stamp.</summary>
 public static class AppInfo
 {
+    /// <summary>The product name, as shown in the macOS menu bar.</summary>
+    public const string Name = "BitKraken";
+
     /// <summary>e.g. "1.0.3", or "1.0.3-preview" for a build off a pull request.</summary>
     public static string Version { get; } = ReadVersion();
 
