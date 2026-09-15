@@ -101,7 +101,8 @@ runners:
 
 - **Pull request** → builds a **preview**, `1.0.x-preview`, and uploads every platform's packages as workflow artifacts.
 - **Merge to `main`** → builds `1.0.x`, tags the commit `v1.0.x` and publishes a GitHub **release** with all the
-  packages attached, so it shows up under *Releases*.
+  packages attached, so it shows up under *Releases*. Only pushes that touch [`src/`](src) build: a merge that
+  changes nothing but docs, scripts or packaging is skipped and releases nothing.
 - **Tag push** `v1.2.3` → builds that exact version and publishes the release.
 - **Run workflow** (manual) → builds with the version you enter, or the next `1.0.x` if you leave it empty.
 

@@ -33,6 +33,7 @@ jobs:
     outputs:
       value: ${{ steps.version.outputs.value }}
       channel: ${{ steps.version.outputs.channel }}
+      build: ${{ steps.changes.outputs.build }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -59,9 +60,40 @@ jobs:
           echo "channel=$channel" >> "$GITHUB_OUTPUT"
           echo "### BitKraken $version ($channel build)" >> "$GITHUB_STEP_SUMMARY"
 
+      # Only source changes are worth an installer on main/master: a docs, packaging or
+      # workflow only merge must not build and must not cut a release. Pull requests, tag
+      # pushes and manual dispatches are never filtered - they always build.
+      # (The filter lives here rather than in an `on.push.paths` trigger because that one
+      # would apply to the `v*` tag pushes in the same trigger, whose payloads carry no
+      # changed files, and would silently stop tagged releases from building at all.)
+      - id: changes
+        env:
+          BEFORE: ${{ github.event.before }}
+        run: |
+          if [[ "${GITHUB_EVENT_NAME}" != "push" || "${GITHUB_REF}" == refs/tags/* ]]; then
+            echo "build=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # A new branch or a force-push leaves nothing to compare against; build rather
+          # than silently skip.
+          if [[ -z "${BEFORE}" || "${BEFORE}" =~ ^0+$ ]] || ! git cat-file -e "${BEFORE}^{commit}" 2>/dev/null; then
+            echo "build=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [[ -n "$(git diff --name-only "${BEFORE}" "${GITHUB_SHA}" -- src)" ]]; then
+            echo "build=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "build=false" >> "$GITHUB_OUTPUT"
+            echo "No \`src/\` changes in this push - skipping the installer build." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
   # A red test run must not produce an installer, let alone a release.
   test:
     name: Unit tests
+    needs: version
+    if: needs.version.outputs.build == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -75,6 +107,7 @@ jobs:
   package:
     name: ${{ matrix.name }}
     needs: [version, test]
+    if: needs.version.outputs.build == 'true'
     runs-on: ${{ matrix.runs-on }}
     defaults:
       run:
