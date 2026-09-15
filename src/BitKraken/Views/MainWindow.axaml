@@ -2,6 +2,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:vm="using:BitKraken.ViewModels"
         xmlns:c="using:BitKraken.Controls"
+        xmlns:app="using:BitKraken"
         xmlns:chrome="using:Avalonia.Controls.Chrome"
         x:Class="BitKraken.Views.MainWindow"
         x:DataType="vm:MainWindowViewModel"
@@ -99,7 +100,7 @@
                         <Path Data="{StaticResource Kraken.LogoGeometry}" Stretch="Uniform" Width="17" Height="17" Fill="White" />
                     </Panel>
                     <TextBlock Text="BitKraken" Classes="gradient" FontSize="15" FontWeight="Bold" VerticalAlignment="Center" />
-                    <TextBlock Text="v1.0" Classes="muted" FontSize="11" VerticalAlignment="Center" Margin="-4,2,0,0" />
+                    <TextBlock Text="{x:Static app:AppInfo.DisplayVersion}" Classes="muted" FontSize="11" VerticalAlignment="Center" Margin="-4,2,0,0" />
                 </StackPanel>
 
                 <!-- Windows / Linux caption buttons; hidden on macOS -->

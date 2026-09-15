@@ -24,6 +24,10 @@ public partial class App : Application
 
     public override void Initialize()
     {
+        // macOS titles the application menu - and its About / Hide / Quit items - after this. Without it
+        // Avalonia falls back to "Avalonia Application", which is what the menu bar then shows.
+        Name = AppInfo.Name;
+
         AvaloniaXamlLoader.Load(this);
     }
 

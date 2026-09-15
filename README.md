@@ -55,21 +55,52 @@ On Windows: `.\scripts\publish.ps1 -Rids win-x64`. Output lands in `publish/<rid
 
 Supported RIDs: `win-x64`, `win-arm64`, `linux-x64`, `linux-arm64`, `osx-x64`, `osx-arm64`.
 
-## macOS installer (Apple Silicon)
+## Installers
+
+macOS gets a real `.app` bundle plus installers; Windows and Linux get a self-contained single-file build in an
+archive. Build them locally with:
 
 ```bash
-scripts/package-macos.sh osx-arm64 1.0.0
+scripts/package-macos.sh osx-arm64 1.0.0      # .dmg + .pkg
+scripts/package-portable.sh win-x64 1.0.0     # .zip
+scripts/package-portable.sh linux-x64 1.0.0   # .tar.gz
 ```
 
-produces `dist/BitKraken-<version>-osx-arm64.dmg` (drag-to-Applications) and `.pkg` (installer), built from a proper
-`BitKraken.app` bundle that registers the `.torrent` file type and `magnet:` URL scheme.
+Everything lands in `dist/`:
 
-The [macOS installer workflow](.github/workflows/macos-installer.yml) runs the same script on an Apple Silicon runner:
+| Platform | RID | Packages |
+| --- | --- | --- |
+| macOS (Apple Silicon) | `osx-arm64` | `.dmg` (drag-to-Applications) and `.pkg` (installer), from a `BitKraken.app` bundle that registers the `.torrent` file type and `magnet:` URL scheme |
+| Windows | `win-x64`, `win-arm64` | `.zip` |
+| Linux | `linux-x64`, `linux-arm64` | `.tar.gz` |
 
-- **Tag push** `v1.2.3` → builds, uploads artifacts and attaches the `.dmg`/`.pkg` to a GitHub release.
-- **Run workflow** (manual) → builds with the version you enter and uploads artifacts.
+The [installers workflow](.github/workflows/installers.yml) builds all five in parallel on macOS, Windows and Linux
+runners:
 
-Packages are ad-hoc signed unless you add these repository secrets, in which case they are Developer ID signed and
+- **Pull request** → builds a **preview**, `1.0.x-preview`, and uploads every platform's packages as workflow artifacts.
+- **Merge to `main`** → builds `1.0.x`, tags the commit `v1.0.x` and publishes a GitHub **release** with all the
+  packages attached, so it shows up under *Releases*.
+- **Tag push** `v1.2.3` → builds that exact version and publishes the release.
+- **Run workflow** (manual) → builds with the version you enter, or the next `1.0.x` if you leave it empty.
+
+### Versioning
+
+Versions are `1.0.x`, where `x` is the patch of the highest existing `v1.0.*` tag plus one — so the first merge to
+`main` releases `1.0.0`, the next `1.0.1`, and so on. A pull request builds the same next patch with a `-preview`
+suffix, which is a preview of what merging it would release. [`scripts/next-version.sh`](scripts/next-version.sh)
+computes it and can be run locally:
+
+```bash
+scripts/next-version.sh release   # 1.0.3
+scripts/next-version.sh preview   # 1.0.3-preview
+scripts/next-version.sh current   # 1.0.2 (the latest released version)
+```
+
+Releases are the source of truth for the counter, so nothing needs to be committed to bump a version. To move to a
+new series, push a tag for it (e.g. `v1.1.0`) or set `VERSION_SERIES=1.1`. Pre-release suffixes are kept in file
+names and .NET assembly metadata; the app bundle and `.pkg` get the numeric `1.0.x` core, which is all macOS accepts.
+
+macOS packages are ad-hoc signed unless you add these repository secrets, in which case they are Developer ID signed and
 notarized: `MACOS_CERTIFICATE_P12` (base64 `.p12`), `MACOS_CERTIFICATE_PASSWORD`, `MACOS_SIGNING_IDENTITY`
 (`Developer ID Application: …`), `MACOS_INSTALLER_IDENTITY` (`Developer ID Installer: …`), `APPLE_ID`,
 `APPLE_TEAM_ID`, `APPLE_APP_PASSWORD` (app-specific password).
