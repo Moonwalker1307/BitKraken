@@ -23,6 +23,7 @@ public sealed partial class SettingsViewModel : ViewModelBase
         _enableLocalPeerDiscovery = settings.EnableLocalPeerDiscovery;
         _enablePortForwarding = settings.EnablePortForwarding;
         _requireEncryption = settings.RequireEncryption;
+        _addFallbackTrackers = settings.AddFallbackTrackers;
         _startTorrentsAutomatically = settings.StartTorrentsAutomatically;
         _autoStartMagnetFromClipboard = settings.AutoStartMagnetFromClipboard;
         _handleMagnetLinks = settings.HandleMagnetLinks;
@@ -39,6 +40,7 @@ public sealed partial class SettingsViewModel : ViewModelBase
     [ObservableProperty] private bool _enableLocalPeerDiscovery;
     [ObservableProperty] private bool _enablePortForwarding;
     [ObservableProperty] private bool _requireEncryption;
+    [ObservableProperty] private bool _addFallbackTrackers;
     [ObservableProperty] private bool _startTorrentsAutomatically;
     [ObservableProperty] private bool _autoStartMagnetFromClipboard;
     [ObservableProperty] private bool _handleMagnetLinks;
@@ -60,6 +62,7 @@ public sealed partial class SettingsViewModel : ViewModelBase
         EnableLocalPeerDiscovery = EnableLocalPeerDiscovery,
         EnablePortForwarding = EnablePortForwarding,
         RequireEncryption = RequireEncryption,
+        AddFallbackTrackers = AddFallbackTrackers,
         StartTorrentsAutomatically = StartTorrentsAutomatically,
         AutoStartMagnetFromClipboard = AutoStartMagnetFromClipboard,
         HandleMagnetLinks = HandleMagnetLinks,

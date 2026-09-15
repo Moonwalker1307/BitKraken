@@ -15,6 +15,20 @@ public sealed class TorrentService : IAsyncDisposable
 {
     private static readonly string PausedStatePath = Path.Combine(SettingsService.AppDataDirectory, "paused.json");
 
+    /// <summary>
+    /// Well-known open trackers appended to public torrents when <see cref="AppSettings.AddFallbackTrackers"/>
+    /// is on. Each goes into its own tier so a slow one never holds up the others.
+    /// </summary>
+    private static readonly string[] FallbackTrackers =
+    [
+        "udp://tracker.opentrackr.org:1337/announce",
+        "udp://open.demonii.com:1337/announce",
+        "udp://open.stealth.si:80/announce",
+        "udp://tracker.torrent.eu.org:451/announce",
+        "udp://explodie.org:6969/announce",
+        "udp://tracker.openbittorrent.com:6969/announce",
+    ];
+
     private readonly SettingsService _settings;
     private readonly HashSet<string> _pausedByUser = new(StringComparer.OrdinalIgnoreCase);
     private readonly SemaphoreSlim _stateLock = new(1, 1);
@@ -66,6 +80,9 @@ public sealed class TorrentService : IAsyncDisposable
             HookManager(manager);
             TorrentAdded?.Invoke(this, manager);
 
+            // Cheap (no network I/O) and idempotent, so it's safe to redo on every restore.
+            await AddFallbackTrackersAsync(manager);
+
             if (!_pausedByUser.Contains(Key(manager)))
                 _ = SafeStartAsync(manager);
         }
@@ -97,6 +114,8 @@ public sealed class TorrentService : IAsyncDisposable
     {
         HookManager(manager);
         TorrentAdded?.Invoke(this, manager);
+
+        await AddFallbackTrackersAsync(manager);
 
         var start = autoStart ?? _settings.Current.StartTorrentsAutomatically;
         if (start)
@@ -213,6 +232,69 @@ public sealed class TorrentService : IAsyncDisposable
         catch (Exception ex)
         {
             EngineError?.Invoke(this, $"Could not apply settings: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Appends <see cref="FallbackTrackers"/> to a public torrent. More trackers queried in parallel means
+    /// a better chance one answers quickly, which is usually what gates time-to-first-peer on a magnet.
+    /// Private torrents are left untouched - MonoTorrent throws for those, and announcing a private
+    /// torrent to public trackers is exactly what gets people banned from private sites.
+    /// </summary>
+    private async Task AddFallbackTrackersAsync(TorrentManager manager)
+    {
+        if (!_settings.Current.AddFallbackTrackers) return;
+
+        var trackerManager = manager.TrackerManager;
+        if (trackerManager.Private || manager.Torrent?.IsPrivate == true) return;
+
+        var existing = trackerManager.Tiers
+            .SelectMany(tier => tier.Trackers)
+            .Select(tracker => tracker.Uri.ToString())
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        var added = new List<Uri>();
+        foreach (var url in FallbackTrackers)
+        {
+            if (existing.Contains(url)) continue;
+            try
+            {
+                var uri = new Uri(url);
+                await trackerManager.AddTrackerAsync(uri);
+                added.Add(uri);
+            }
+            catch
+            {
+                // A tracker we couldn't add is not worth failing the whole add over.
+            }
+        }
+
+        // A magnet has no metadata yet, so the private flag is still unknown and reads as false. Add the
+        // trackers now (that's where the speed-up is) but take them back out if metadata says private.
+        if (manager.Torrent is null && added.Count > 0)
+            _ = RemoveTrackersIfPrivateAsync(manager, added);
+    }
+
+    /// <summary>Strips the trackers added by <see cref="AddFallbackTrackersAsync"/> if metadata reveals a private torrent.</summary>
+    private static async Task RemoveTrackersIfPrivateAsync(TorrentManager manager, List<Uri> added)
+    {
+        try
+        {
+            await manager.WaitForMetadataAsync();
+            if (manager.Torrent?.IsPrivate != true) return;
+
+            var trackerManager = manager.TrackerManager;
+            var stale = trackerManager.Tiers
+                .SelectMany(tier => tier.Trackers)
+                .Where(tracker => added.Contains(tracker.Uri))
+                .ToList();
+
+            foreach (var tracker in stale)
+                await trackerManager.RemoveTrackerAsync(tracker);
+        }
+        catch
+        {
+            // Torrent removed before metadata arrived, or the manager won't allow removal - nothing to do.
         }
     }
 
