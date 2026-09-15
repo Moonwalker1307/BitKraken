@@ -6,6 +6,8 @@ A sleek, cross-platform BitTorrent client for macOS, Windows and Linux — built
 Dark, purple-tinted glass UI with an animated aurora backdrop, glowing progress bars, a live piece map and
 real-time transfer graphs.
 
+![BitKraken on macOS: a torrent downloading at 14.4 MB/s over 14 peers, with the sidebar filters, live piece map, transfer graph and details panel shown against the aurora backdrop](docs/screenshot.png)
+
 ## Features
 
 - **Torrents & magnets** — open `.torrent` files, paste magnet links, drag-and-drop onto the window, click a magnet
@@ -13,9 +15,17 @@ real-time transfer graphs.
 - **Clipboard watch** — copies a magnet link? BitKraken offers to add it (toggle in Settings).
 - **Full engine** — DHT, PEX, local peer discovery, UPnP/NAT-PMP port forwarding, protocol encryption,
   per-file priorities, global rate limits, fast-resume and session restore.
+- **Fast first peers** — a small set of well-known public trackers is appended to public torrents as they're added,
+  which is usually the biggest cut to a magnet's time-to-first-peer. Never applied to private torrents; toggle in
+  Settings.
 - **Details panel** — overview (piece map + speed graph + stats), files (priority / skip), peers, trackers.
 - **Filters & search** — All / Downloading / Seeding / Completed / Paused / Errors, plus instant name search.
+- **Per-torrent actions** — resume, pause, force re-check, open folder, copy magnet link and remove, from the
+  right-click menu.
 - **Keyboard** — `Ctrl/⌘+O` add file, `Ctrl/⌘+M` add magnet, `Ctrl/⌘+,` settings, `Delete` remove.
+- **Easy on older machines** — the animated aurora background can be turned off in Settings.
+
+The title bar shows the running build's version, so a packaged build says exactly what it is.
 
 ## Magnet links from your browser
 
@@ -51,8 +61,9 @@ dotnet test tests/BitKraken.Tests
 ```
 
 Unit tests cover the pure logic: display formatting, settings persistence (including the fallback
-when `settings.json` is corrupt and the defaults an older build never wrote), the shell-argument
-normalization behind magnet links, and the tag arithmetic in `scripts/next-version.sh`. They run on
+when `settings.json` is corrupt and the defaults an older build never wrote), the settings clone the
+dialog edits before you press OK, the shell-argument normalization behind magnet links, the version
+string shown in the title bar, and the tag arithmetic in `scripts/next-version.sh`. They run on
 every push, and a red run blocks the installer build.
 
 ## Publish self-contained binaries
@@ -127,11 +138,17 @@ notarized: `MACOS_CERTIFICATE_P12` (base64 `.p12`), `MACOS_CERTIFICATE_PASSWORD`
 
 ```
 src/BitKraken/
+  Program.cs     Entry point: hands off to a running instance, then starts Avalonia
+  AppInfo.cs     The running build's version, as shown in the title bar
+  Format.cs      Sizes, rates, durations and ratios as the UI shows them
   Controls/      Custom-drawn controls: AuroraBackground, GlowProgressBar, PieceMap, SpeedGraph
-  Services/      TorrentService (MonoTorrent wrapper), SettingsService, IDialogService
+  Models/        AppSettings — everything Settings persists to settings.json
+  Services/      TorrentService (MonoTorrent wrapper), SettingsService, ShellIntegration
+                 (magnet / .torrent registration), SingleInstance, IDialogService
   ViewModels/    MVVM view-models (CommunityToolkit.Mvvm)
   Views/         MainWindow + Add / Settings / Remove dialogs (Avalonia XAML)
   Styles/        Colors.axaml (palette, icons) and Theme.axaml (control styles, animations)
+  Assets/        App icon (.ico / .png)
   Diagnostics/   Env-var driven dev hooks (headless screenshots)
 tests/BitKraken.Tests/   xUnit tests for the logic that does not need a window
 ```
