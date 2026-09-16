@@ -34,6 +34,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         _service.TorrentAdded += (_, m) => Dispatcher.UIThread.Post(() => OnTorrentAdded(m));
         _service.TorrentRemoved += (_, m) => Dispatcher.UIThread.Post(() => OnTorrentRemoved(m));
         _service.EngineError += (_, msg) => Dispatcher.UIThread.Post(() => ShowToast("Engine", msg, isError: true));
+        _service.NetworkSuspendedChanged += (_, suspended) => Dispatcher.UIThread.Post(() => OnNetworkSuspendedChanged(suspended));
         _settings.Changed += (_, _) => Dispatcher.UIThread.Post(ApplyUiSettings);
 
         for (var i = 0; i < HistoryLength; i++)
@@ -77,6 +78,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase
     [ObservableProperty] private string _totalDownloadRateText = "0 B/s";
     [ObservableProperty] private string _totalUploadRateText = "0 B/s";
     [ObservableProperty] private string _dhtStatusText = "DHT: off";
+    [ObservableProperty] private string _networkStatusText = "";
+    [ObservableProperty] private bool _isNetworkBlocked;
     [ObservableProperty] private string _listenPortText = "";
     [ObservableProperty] private string _connectionsText = "0 peers";
     [ObservableProperty] private double[] _downloadSamples = [];
@@ -101,6 +104,9 @@ public sealed partial class MainWindowViewModel : ViewModelBase
             await _service.InitializeAsync();
             IsEngineReady = true;
             ApplyUiSettings();
+
+            // The tunnel can already be down before we ever start, so take the state the engine came up in.
+            if (_service.IsNetworkSuspended) OnNetworkSuspendedChanged(true);
             _tick.Start();
         }
         catch (Exception ex)
@@ -136,6 +142,27 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         ListenPortText = binding.IsBound
             ? $"Port {_settings.Current.ListenPort} · {binding.Describe()}"
             : $"Port {_settings.Current.ListenPort}";
+
+        if (IsNetworkBlocked)
+            NetworkStatusText = $"{binding.InterfaceName} is down - torrents held";
+    }
+
+    /// <summary>The kill switch tripped or lifted: say so in the status bar, and once as a toast.</summary>
+    private void OnNetworkSuspendedChanged(bool suspended)
+    {
+        IsNetworkBlocked = suspended;
+        var name = _binding.Current.InterfaceName;
+
+        if (suspended)
+        {
+            NetworkStatusText = $"{name} is down - torrents held";
+            ShowToast("Network gone", $"{name} is down. Torrents are held until it is back.", isError: true);
+        }
+        else
+        {
+            NetworkStatusText = "";
+            ShowToast("Network back", $"{name} is up again. Torrents are resuming.", isError: false);
+        }
     }
 
     private void OnTorrentAdded(TorrentManager manager)

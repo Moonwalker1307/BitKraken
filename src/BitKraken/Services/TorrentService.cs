@@ -34,8 +34,9 @@ public sealed class TorrentService : IAsyncDisposable
     private readonly SettingsService _settings;
     private readonly NetworkBinding _binding;
     private readonly Factories _factories;
-    private readonly HashSet<string> _pausedByUser = new(StringComparer.OrdinalIgnoreCase);
+    private readonly TorrentActivation _activation = new();
     private readonly SemaphoreSlim _stateLock = new(1, 1);
+    private readonly SemaphoreSlim _networkLock = new(1, 1);
     private ClientEngine? _engine;
     private bool _shuttingDown;
 
@@ -55,7 +56,7 @@ public sealed class TorrentService : IAsyncDisposable
             .WithHttpClientCreator(httpClients.Create);
 
         _settings.Changed += async (_, _) => await ApplySettingsAsync();
-        _binding.Changed += async (_, _) => await ApplySettingsAsync();
+        _binding.Changed += (_, state) => _ = OnBindingChangedAsync(state);
     }
 
     public ClientEngine Engine => _engine ?? throw new InvalidOperationException("Engine not initialised.");
@@ -65,12 +66,21 @@ public sealed class TorrentService : IAsyncDisposable
     public event EventHandler<TorrentManager>? TorrentRemoved;
     public event EventHandler<string>? EngineError;
 
+    /// <summary>Raised when the kill switch trips (true) or lifts (false).</summary>
+    public event EventHandler<bool>? NetworkSuspendedChanged;
+
+    /// <summary>True while everything is held because the bound interface is gone.</summary>
+    public bool IsNetworkSuspended => _activation.IsSuspended;
+
     /// <summary>Creates (or restores) the engine and starts all torrents that weren't paused by the user.</summary>
     public async Task InitializeAsync()
     {
         if (_engine is not null) return;
 
         LoadPausedSet();
+
+        // A tunnel that is already down at startup means we never start anything in the first place.
+        if (!_binding.Current.IsAvailable) _activation.Suspend();
 
         ClientEngine? engine = null;
         if (File.Exists(SettingsService.EngineStatePath))
@@ -100,7 +110,7 @@ public sealed class TorrentService : IAsyncDisposable
             // Cheap (no network I/O) and idempotent, so it's safe to redo on every restore.
             await AddFallbackTrackersAsync(manager);
 
-            if (!_pausedByUser.Contains(Key(manager)))
+            if (_activation.RequestRestore(Key(manager)))
                 _ = SafeStartAsync(manager);
         }
     }
@@ -137,12 +147,12 @@ public sealed class TorrentService : IAsyncDisposable
         var start = autoStart ?? _settings.Current.StartTorrentsAutomatically;
         if (start)
         {
-            _pausedByUser.Remove(Key(manager));
-            await SafeStartAsync(manager);
+            if (_activation.RequestStart(Key(manager)))
+                await SafeStartAsync(manager);
         }
         else
         {
-            _pausedByUser.Add(Key(manager));
+            _activation.Pause(Key(manager));
         }
 
         SavePausedSet();
@@ -152,14 +162,17 @@ public sealed class TorrentService : IAsyncDisposable
 
     public async Task StartAsync(TorrentManager manager)
     {
-        _pausedByUser.Remove(Key(manager));
+        var start = _activation.RequestStart(Key(manager));
         SavePausedSet();
-        await SafeStartAsync(manager);
+
+        // Suspended: the torrent is now queued rather than paused, and starts itself when the
+        // interface is back. Starting it now would only spray failed connections.
+        if (start) await SafeStartAsync(manager);
     }
 
     public async Task PauseAsync(TorrentManager manager)
     {
-        _pausedByUser.Add(Key(manager));
+        _activation.Pause(Key(manager));
         SavePausedSet();
 
         // MonoTorrent's Pause only works from an active state; Stop is the more robust "hold" for the UI.
@@ -169,7 +182,7 @@ public sealed class TorrentService : IAsyncDisposable
 
     public async Task RemoveAsync(TorrentManager manager, bool deleteData)
     {
-        _pausedByUser.Remove(Key(manager));
+        _activation.Forget(Key(manager));
         SavePausedSet();
 
         if (manager.State != TorrentState.Stopped)
@@ -185,7 +198,7 @@ public sealed class TorrentService : IAsyncDisposable
     {
         if (manager.State != TorrentState.Stopped)
             await manager.StopAsync();
-        await manager.HashCheckAsync(autoStart: !_pausedByUser.Contains(Key(manager)));
+        await manager.HashCheckAsync(autoStart: _activation.RequestRestore(Key(manager)));
     }
 
     public Task StartAllAsync() => Task.WhenAll(Engine.Torrents.Select(StartAsync));
@@ -235,6 +248,84 @@ public sealed class TorrentService : IAsyncDisposable
     }
 
     public async ValueTask DisposeAsync() => await ShutdownAsync();
+
+    /// <summary>
+    /// The kill switch. The bound interface going away stops every torrent that was running and, when
+    /// it returns, starts exactly those again - not the ones the user paused themselves.
+    /// </summary>
+    private async Task OnBindingChangedAsync(NetworkBindingState state)
+    {
+        if (_shuttingDown) return;
+
+        await _networkLock.WaitAsync();
+        try
+        {
+            if (_shuttingDown) return;
+
+            if (!state.IsAvailable)
+            {
+                await SuspendForNetworkAsync();
+                // Re-applying settings now drops the listeners, since there is no address to listen on.
+                await ApplySettingsAsync();
+            }
+            else
+            {
+                // Rebind to the new address first, so the torrents we start are already on the tunnel.
+                await ApplySettingsAsync();
+                await ResumeAfterNetworkAsync();
+            }
+        }
+        catch (Exception ex)
+        {
+            EngineError?.Invoke(this, $"Network change could not be applied: {ex.Message}");
+        }
+        finally
+        {
+            _networkLock.Release();
+        }
+    }
+
+    private async Task SuspendForNetworkAsync()
+    {
+        if (!_activation.Suspend()) return;
+
+        NetworkSuspendedChanged?.Invoke(this, true);
+        if (_engine is null) return;
+
+        foreach (var manager in _engine.Torrents.ToList())
+        {
+            var key = Key(manager);
+            if (_activation.IsPausedByUser(key)) continue;
+
+            _activation.Defer(key);
+            if (manager.State is TorrentState.Stopped or TorrentState.Stopping) continue;
+
+            try
+            {
+                await manager.StopAsync(TimeSpan.FromSeconds(5));
+            }
+            catch
+            {
+                // Already on the way down, or the engine is shutting down: nothing to recover from.
+            }
+        }
+    }
+
+    private async Task ResumeAfterNetworkAsync()
+    {
+        if (!_activation.IsSuspended) return;
+
+        var owed = _activation.Resume();
+        NetworkSuspendedChanged?.Invoke(this, false);
+        if (_engine is null) return;
+
+        var wanted = owed.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        foreach (var manager in _engine.Torrents.ToList())
+        {
+            if (wanted.Contains(Key(manager)))
+                await SafeStartAsync(manager);
+        }
+    }
 
     private async Task ApplySettingsAsync()
     {
@@ -390,7 +481,7 @@ public sealed class TorrentService : IAsyncDisposable
             if (!File.Exists(PausedStatePath)) return;
             var items = JsonSerializer.Deserialize<string[]>(File.ReadAllText(PausedStatePath));
             if (items is null) return;
-            foreach (var item in items) _pausedByUser.Add(item);
+            _activation.LoadPaused(items);
         }
         catch
         {
@@ -402,7 +493,7 @@ public sealed class TorrentService : IAsyncDisposable
     {
         try
         {
-            File.WriteAllText(PausedStatePath, JsonSerializer.Serialize(_pausedByUser.ToArray()));
+            File.WriteAllText(PausedStatePath, JsonSerializer.Serialize(_activation.PausedByUser.ToArray()));
         }
         catch
         {

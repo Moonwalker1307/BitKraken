@@ -52,7 +52,16 @@ public sealed record NetworkBindingState(string InterfaceName, IPAddress? IPv4, 
 /// </summary>
 public sealed class NetworkBinding : IDisposable
 {
+    /// <summary>
+    /// How often the interface list is re-read. NetworkChange doesn't fire reliably for tunnel
+    /// interfaces on every platform, and a kill switch that depends on an event it might not get is
+    /// not a kill switch.
+    /// </summary>
+    private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(5);
+
     private readonly SettingsService _settings;
+    private readonly System.Threading.Timer _poll;
+    private readonly object _gate = new();
     private volatile NetworkBindingState _current;
     private bool _subscribed;
 
@@ -61,6 +70,7 @@ public sealed class NetworkBinding : IDisposable
         _settings = settings;
         _current = Resolve(settings.Current.NetworkInterface);
         _settings.Changed += OnSettingsChanged;
+        _poll = new System.Threading.Timer(_ => Refresh(), null, PollInterval, PollInterval);
 
         try
         {
@@ -84,16 +94,31 @@ public sealed class NetworkBinding : IDisposable
     /// <summary>Re-reads the interface list and publishes the result if it moved.</summary>
     public NetworkBindingState Refresh()
     {
-        var next = Resolve(_settings.Current.NetworkInterface);
-        if (next == _current) return next;
+        NetworkBindingState next;
+        try
+        {
+            next = Resolve(_settings.Current.NetworkInterface);
+        }
+        catch
+        {
+            // Never let a hiccup while enumerating take the polling timer (or the app) down.
+            return _current;
+        }
 
-        _current = next;
+        // The timer and the OS events both land here, so only one of them gets to announce a change.
+        lock (_gate)
+        {
+            if (next == _current) return next;
+            _current = next;
+        }
+
         Changed?.Invoke(this, next);
         return next;
     }
 
     public void Dispose()
     {
+        _poll.Dispose();
         _settings.Changed -= OnSettingsChanged;
         if (!_subscribed) return;
 
@@ -133,7 +158,13 @@ public sealed class NetworkBinding : IDisposable
         }
     }
 
-    public static NetworkBindingState Resolve(string? interfaceName) => Select(Enumerate(), interfaceName);
+    public static NetworkBindingState Resolve(string? interfaceName)
+    {
+        // Nothing bound means nothing to look up - worth short-circuiting, since we poll.
+        if (string.IsNullOrWhiteSpace(interfaceName)) return NetworkBindingState.Unbound;
+
+        return Select(Enumerate(), interfaceName);
+    }
 
     /// <summary>
     /// Picks the addresses for <paramref name="interfaceName"/>. A name we can't find right now resolves to

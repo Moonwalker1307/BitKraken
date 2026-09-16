@@ -19,8 +19,9 @@ real-time transfer graphs.
   which is usually the biggest cut to a magnet's time-to-first-peer. Never applied to private torrents; toggle in
   Settings.
 - **Bind to an interface** — pin peer connections, HTTP tracker announces and DHT to one network interface.
-  Point it at your VPN tunnel and they stop the moment the tunnel does, instead of falling back to your
-  real connection.
+  Point it at your VPN tunnel and nothing takes your normal connection instead.
+- **Kill switch** — if the bound interface drops, torrents are held and connections refused until it is
+  back, then the ones it stopped start again on their own.
 - **Details panel** — overview (piece map + speed graph + stats), files (priority / skip), peers, trackers.
 - **Filters & search** — All / Downloading / Seeding / Completed / Paused / Errors, plus instant name search.
 - **Per-torrent actions** — resume, pause, force re-check, open folder, copy magnet link and remove, from the
@@ -62,9 +63,19 @@ client creates (`wg0`, `tun0`, `utun4`, "ProtonVPN"). While it is set:
 - UPnP/NAT-PMP port forwarding is switched off, because a mapping to a VPN address does nothing and the
   request itself tells your router what you're up to.
 
-If the interface disappears — the tunnel drops — BitKraken stops listening and refuses to open new
-connections rather than falling back to your real one. The address family follows the interface: bind to
-a tunnel with no IPv6 and BitKraken makes no IPv6 connections at all.
+The address family follows the interface: bind to a tunnel with no IPv6 and BitKraken makes no IPv6
+connections at all.
+
+### The kill switch
+
+If the bound interface disappears — the tunnel drops — BitKraken doesn't fall back to your real
+connection. It stops every torrent that was running, drops its listeners, and refuses to open new
+connections; the status bar says which interface is down. When the interface comes back it rebinds and
+restarts exactly the torrents it stopped. Torrents you paused yourself stay paused, and a torrent you
+start while the tunnel is down is queued rather than sent out over the wrong interface.
+
+The interface list is re-read every five seconds as well as on the OS's own network-change events, since
+those don't fire reliably for tunnel interfaces on every platform.
 
 Two things still follow the system routing table, and they will use your normal connection if your VPN is
 *not* the default route (a split tunnel): UDP tracker announces, which MonoTorrent sends from an unbound
