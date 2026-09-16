@@ -166,8 +166,9 @@ jobs:
           echo "SIGNING_IDENTITY=$MACOS_SIGNING_IDENTITY" >> "$GITHUB_ENV"
           echo "INSTALLER_IDENTITY=$MACOS_INSTALLER_IDENTITY" >> "$GITHUB_ENV"
 
-      # macOS gets a real .app bundle plus .dmg/.pkg installers; the other platforms get a
-      # self-contained single-file build archived as .zip (Windows) or .tar.gz (Linux).
+      # macOS gets a real .app bundle plus .dmg/.pkg installers and Windows a setup .exe; every
+      # platform also gets a self-contained single-file build archived as .zip (Windows) or
+      # .tar.gz (Linux), for anyone who would rather not install anything.
       - name: Build app bundle, DMG and PKG
         if: startsWith(matrix.rid, 'osx-')
         run: scripts/package-macos.sh "${{ matrix.rid }}" "$VERSION"
@@ -175,6 +176,21 @@ jobs:
       - name: Build portable package
         if: ${{ !startsWith(matrix.rid, 'osx-') }}
         run: scripts/package-portable.sh "${{ matrix.rid }}" "$VERSION"
+
+      # windows-latest ships Inno Setup, but the image's tool list is not a contract - install it
+      # if a future image drops it.
+      - name: Set up Inno Setup
+        if: startsWith(matrix.rid, 'win-')
+        run: |
+          if [ -f "/c/Program Files (x86)/Inno Setup 6/ISCC.exe" ]; then
+            echo "Inno Setup is already installed."
+          else
+            choco install innosetup --no-progress -y
+          fi
+
+      - name: Build installer
+        if: startsWith(matrix.rid, 'win-')
+        run: scripts/package-windows.sh "${{ matrix.rid }}" "$VERSION"
 
       - name: Notarize
         if: startsWith(matrix.rid, 'osx-') && env.MACOS_CERTIFICATE_P12 != '' && env.APPLE_ID != '' && needs.version.outputs.channel != 'preview'
@@ -191,6 +207,7 @@ jobs:
           path: |
             dist/*.dmg
             dist/*.pkg
+            dist/*.exe
             dist/*.zip
             dist/*.tar.gz
           if-no-files-found: error
