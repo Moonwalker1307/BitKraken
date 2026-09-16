@@ -22,6 +22,9 @@ real-time transfer graphs.
   Point it at your VPN tunnel and nothing takes your normal connection instead.
 - **Kill switch** — if the bound interface drops, torrents are held and connections refused until it is
   back, then the ones it stopped start again on their own.
+- **SOCKS5 / HTTP proxy** — send peers and trackers through a proxy, with the hostname resolved at the
+  far end. UDP trackers, DHT, local peer discovery and the incoming listener switch off while it's on,
+  because a TCP proxy can't carry them.
 - **Details panel** — overview (piece map + speed graph + stats), files (priority / skip), peers, trackers.
 - **Filters & search** — All / Downloading / Seeding / Completed / Paused / Errors, plus instant name search.
 - **Per-torrent actions** — resume, pause, force re-check, open folder, copy magnet link and remove, from the
@@ -81,6 +84,33 @@ Two things still follow the system routing table, and they will use your normal 
 *not* the default route (a split tunnel): UDP tracker announces, which MonoTorrent sends from an unbound
 socket, and DNS lookups for tracker hostnames. In the usual setup, where the VPN *is* the default route,
 they go over the tunnel like everything else.
+
+## Proxy
+
+**Settings → Proxy** sends peer connections and tracker announces through a SOCKS5 (RFC 1928) or HTTP
+CONNECT proxy — the kind VPN providers hand out for torrent clients. Username/password authentication is
+supported for both (RFC 1929 and Basic, respectively).
+
+Target hostnames are handed to the proxy to resolve rather than looked up here, so tracker names don't
+leak as DNS queries from your machine. If the proxy is selected but misconfigured, connections fail with
+the proxy's own error — BitKraken never falls back to a direct connection.
+
+A SOCKS5 or HTTP proxy carries TCP only, so while one is set BitKraken turns off everything that isn't:
+
+| | Why |
+| --- | --- |
+| UDP trackers | UDP can't cross the proxy. They stay in the tracker list, marked as not announced, rather than silently announcing from your own address — the bundled public trackers are all UDP, so expect them to sit idle. |
+| DHT | Also UDP. |
+| Local peer discovery | A multicast shout on the LAN, which no proxy can carry. |
+| Incoming connections | The listener is stopped: a peer reaching your real address defeats the point. |
+| UPnP / NAT-PMP | Nothing to forward while nothing is listening. |
+
+That leaves HTTP(S) trackers and outgoing peer connections, which is the usual trade for a proxy.
+Binding and a proxy compose: the connection to the proxy itself is made from the bound interface.
+
+The proxy password is stored in `settings.json` in plain text, like the rest of your settings. On macOS
+and Linux that file is written readable by its owner only; on Windows the per-user AppData folder is the
+protection.
 
 ## Requirements
 

@@ -1,26 +1,25 @@
 using System.Collections.Concurrent;
-using System.Net;
 using System.Net.Sockets;
 
 namespace BitKraken.Services;
 
 /// <summary>
-/// The <see cref="HttpClient"/> MonoTorrent announces to HTTP trackers with, bound to the same interface
-/// as peer traffic. A tracker announce carries your IP as surely as a peer connection does, so leaving it
-/// on the default route would undo the binding.
+/// The <see cref="HttpClient"/> MonoTorrent announces to HTTP trackers with, taking the same route as
+/// peer traffic. A tracker announce carries your IP as surely as a peer connection does, so leaving it
+/// on the default route would undo the binding - and skipping the proxy would undo the proxy.
 /// </summary>
 public sealed class BoundHttpClientFactory
 {
     private static readonly TimeSpan ConnectionLifetime = TimeSpan.FromMinutes(2);
     private static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(30);
 
-    private readonly NetworkBinding _binding;
+    private readonly OutboundConnector _outbound;
 
-    // One handler per address family, reused: the binding is read inside the connect callback, so a
-    // cached handler still picks up an interface that changed since it was created.
+    // One handler per address family, reused: the route is worked out inside the connect callback, so a
+    // cached handler still picks up an interface or a proxy that changed since it was created.
     private readonly ConcurrentDictionary<AddressFamily, SocketsHttpHandler> _handlers = new();
 
-    public BoundHttpClientFactory(NetworkBinding binding) => _binding = binding;
+    public BoundHttpClientFactory(OutboundConnector outbound) => _outbound = outbound;
 
     public HttpClient Create(AddressFamily family)
     {
@@ -33,50 +32,16 @@ public sealed class BoundHttpClientFactory
     private SocketsHttpHandler CreateHandler(AddressFamily family) => new()
     {
         PooledConnectionLifetime = ConnectionLifetime,
-        ConnectCallback = (context, token) => ConnectAsync(family, context.DnsEndPoint, token),
-    };
-
-    private async ValueTask<Stream> ConnectAsync(AddressFamily family, DnsEndPoint endPoint, CancellationToken token)
-    {
-        var binding = _binding.Current;
-        var candidates = await ResolveAsync(endPoint.Host, token).ConfigureAwait(false);
-
-        var usable = candidates
-            .Where(address => family is AddressFamily.Unspecified || address.AddressFamily == family)
-            .Where(address => binding.Allows(address.AddressFamily))
-            .ToList();
-
-        if (usable.Count == 0)
-            throw new SocketException((int)SocketError.NetworkUnreachable);
-
-        Exception? last = null;
-        foreach (var address in usable)
+        ConnectCallback = async (context, token) =>
         {
-            var socket = new Socket(address.AddressFamily, SocketType.Stream, ProtocolType.Tcp) { NoDelay = true };
-            try
-            {
-                if (binding.SourceAddress(address.AddressFamily) is { } source)
-                    socket.Bind(new IPEndPoint(source, 0));
+            // Unspecified means "either family will do"; the connector then picks from what it may use.
+            AddressFamily? wanted = family is AddressFamily.Unspecified ? null : family;
 
-                await socket.ConnectAsync(new IPEndPoint(address, endPoint.Port), token).ConfigureAwait(false);
-                return new NetworkStream(socket, ownsSocket: true);
-            }
-            catch (Exception ex)
-            {
-                socket.Dispose();
-                if (token.IsCancellationRequested) throw;
-                last = ex;
-            }
-        }
+            var socket = await _outbound
+                .ConnectAsync(context.DnsEndPoint.Host, context.DnsEndPoint.Port, wanted, token)
+                .ConfigureAwait(false);
 
-        throw last ?? new SocketException((int)SocketError.HostUnreachable);
-    }
-
-    private static async Task<IReadOnlyList<IPAddress>> ResolveAsync(string host, CancellationToken token)
-    {
-        if (IPAddress.TryParse(host, out var literal))
-            return [literal];
-
-        return await Dns.GetHostAddressesAsync(host, token).ConfigureAwait(false);
-    }
+            return new NetworkStream(socket, ownsSocket: true);
+        },
+    };
 }

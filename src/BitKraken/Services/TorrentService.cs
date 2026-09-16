@@ -6,6 +6,8 @@ using MonoTorrent;
 using MonoTorrent.Client;
 using MonoTorrent.Connections;
 using MonoTorrent.Connections.Peer;
+using MonoTorrent.Connections.Tracker;
+using MonoTorrent.Trackers;
 
 namespace BitKraken.Services;
 
@@ -40,21 +42,29 @@ public sealed class TorrentService : IAsyncDisposable
     private ClientEngine? _engine;
     private bool _shuttingDown;
 
+    // The route in force the last time settings were applied, so we can tell when it moved.
+    private (ProxyConfiguration Proxy, string Interface) _appliedRoute;
+
     public TorrentService(SettingsService settings, NetworkBinding binding)
     {
         _settings = settings;
         _binding = binding;
 
-        // Every socket the engine opens goes through these, so an interface binding covers peers and
-        // trackers alike. They read the binding per connection, which is what lets it change at runtime.
-        var connector = new BoundSocketConnector(binding);
-        var httpClients = new BoundHttpClientFactory(binding);
+        // Every socket the engine opens goes through these, so the binding and the proxy cover peers and
+        // trackers alike. They read the settings per connection, which is what lets them change at runtime.
+        var outbound = new OutboundConnector(binding, settings);
+        var connector = new BoundSocketConnector(outbound);
+        var httpClients = new BoundHttpClientFactory(outbound);
         _factories = Factories.Default
             .WithPeerConnectionCreator("ipv4", uri => new SocketPeerConnection(uri, connector))
             .WithPeerConnectionCreator("ipv6", uri => new SocketPeerConnection(uri, connector))
             .WithSocketConnectorCreator(() => connector)
-            .WithHttpClientCreator(httpClients.Create);
+            .WithHttpClientCreator(httpClients.Create)
+            .WithTrackerCreator("udp", uri => new Tracker(
+                BlockedWhileProxied(new UdpTrackerConnection(uri, AddressFamily.InterNetwork)),
+                BlockedWhileProxied(new UdpTrackerConnection(uri, AddressFamily.InterNetworkV6))));
 
+        _appliedRoute = CurrentRoute();
         _settings.Changed += async (_, _) => await ApplySettingsAsync();
         _binding.Changed += (_, state) => _ = OnBindingChangedAsync(state);
     }
@@ -99,6 +109,7 @@ public sealed class TorrentService : IAsyncDisposable
         }
 
         engine ??= new ClientEngine(BuildEngineSettings(_settings.Current), _factories);
+        _appliedRoute = CurrentRoute();
         engine.CriticalException += (_, e) => EngineError?.Invoke(this, e.Exception.Message);
         _engine = engine;
 
@@ -336,10 +347,45 @@ public sealed class TorrentService : IAsyncDisposable
             var torrentSettings = BuildTorrentSettings();
             foreach (var manager in _engine.Torrents)
                 await manager.UpdateSettingsAsync(torrentSettings);
+
+            await RestartIfRouteChangedAsync();
         }
         catch (Exception ex)
         {
             EngineError?.Invoke(this, $"Could not apply settings: {ex.Message}");
+        }
+    }
+
+    private (ProxyConfiguration Proxy, string Interface) CurrentRoute()
+        => (ProxyConfiguration.From(_settings.Current), _binding.Current.InterfaceName);
+
+    /// <summary>
+    /// Turning a proxy on doesn't do much for connections that are already open - they keep running
+    /// along the old path, from the address the proxy was meant to replace. So when the route changes,
+    /// the torrents are cycled and every connection is made again the new way.
+    /// </summary>
+    private async Task RestartIfRouteChangedAsync()
+    {
+        var route = CurrentRoute();
+        if (route == _appliedRoute) return;
+
+        _appliedRoute = route;
+        if (_engine is null || _activation.IsSuspended) return;
+
+        foreach (var manager in _engine.Torrents.ToList())
+        {
+            if (_activation.IsPausedByUser(Key(manager))) continue;
+            if (manager.State is TorrentState.Stopped or TorrentState.Stopping) continue;
+
+            try
+            {
+                await manager.StopAsync(TimeSpan.FromSeconds(5));
+                await manager.StartAsync();
+            }
+            catch (Exception ex)
+            {
+                EngineError?.Invoke(this, $"Could not restart \"{manager.Name}\" on the new route: {ex.Message}");
+            }
         }
     }
 
@@ -429,9 +475,14 @@ public sealed class TorrentService : IAsyncDisposable
         }
     }
 
+    /// <summary>Wraps a UDP tracker so it stops announcing the moment a proxy is configured.</summary>
+    private ITrackerConnection BlockedWhileProxied(ITrackerConnection connection)
+        => new ProxyBlockedTrackerConnection(connection, () => ProxyConfiguration.From(_settings.Current).IsEnabled);
+
     private EngineSettings BuildEngineSettings(AppSettings s)
     {
         var binding = _binding.Current;
+        var proxy = ProxyConfiguration.From(s);
         var listenV4 = binding.ListenAddress(AddressFamily.InterNetwork);
         var listenV6 = binding.ListenAddress(AddressFamily.InterNetworkV6);
 
@@ -441,14 +492,20 @@ public sealed class TorrentService : IAsyncDisposable
         if (listenV4 is not null) listenEndPoints["ipv4"] = new IPEndPoint(listenV4, s.ListenPort);
         if (listenV6 is not null) listenEndPoints["ipv6"] = new IPEndPoint(listenV6, s.ListenPort);
 
+        // A proxy carries outgoing connections only. Accepting incoming ones would let a peer reach the
+        // address the proxy exists to hide, so we stop listening entirely while one is set.
+        if (proxy.IsEnabled) listenEndPoints.Clear();
+
         var dhtAddress = listenV4 ?? listenV6;
 
         var builder = new EngineSettingsBuilder
         {
             // Asking the router to forward a port to a VPN address is meaningless, and the request
             // itself tells the LAN what we're doing, so it goes off whenever we're bound.
-            AllowPortForwarding = s.EnablePortForwarding && !binding.IsBound,
-            AllowLocalPeerDiscovery = s.EnableLocalPeerDiscovery,
+            AllowPortForwarding = s.EnablePortForwarding && !binding.IsBound && !proxy.IsEnabled,
+
+            // Local peer discovery is a multicast shout on the LAN, and no proxy can carry it.
+            AllowLocalPeerDiscovery = s.EnableLocalPeerDiscovery && !proxy.IsEnabled,
             AutoSaveLoadDhtCache = true,
             AutoSaveLoadFastResume = true,
             AutoSaveLoadMagnetLinkMetadata = true,
@@ -457,7 +514,10 @@ public sealed class TorrentService : IAsyncDisposable
             MaximumDownloadRate = Math.Max(0, s.MaxDownloadRateKiB) * 1024,
             MaximumUploadRate = Math.Max(0, s.MaxUploadRateKiB) * 1024,
             ListenEndPoints = listenEndPoints,
-            DhtEndPoint = s.EnableDht && dhtAddress is not null ? new IPEndPoint(dhtAddress, s.ListenPort) : null,
+            // DHT is UDP, so it goes the same way as the UDP trackers when a proxy is set: nowhere.
+            DhtEndPoint = s.EnableDht && !proxy.IsEnabled && dhtAddress is not null
+                ? new IPEndPoint(dhtAddress, s.ListenPort)
+                : null,
         };
 
         if (s.RequireEncryption)

@@ -18,6 +18,12 @@ public sealed partial class SettingsViewModel : ViewModelBase
         var boundInterface = settings.NetworkInterface?.Trim() ?? "";
         NetworkInterfaces = NetworkInterfaceChoice.Build(boundInterface);
         _selectedNetworkInterface = NetworkInterfaces.First(c => c.Name == boundInterface);
+        ProxyModes = ProxyModeChoice.All;
+        _selectedProxyMode = ProxyModes.First(c => c.Mode == settings.ProxyMode);
+        _proxyHost = settings.ProxyHost ?? "";
+        _proxyPort = settings.ProxyPort;
+        _proxyUsername = settings.ProxyUsername ?? "";
+        _proxyPassword = settings.ProxyPassword ?? "";
         _maxDownloadRateKiB = settings.MaxDownloadRateKiB;
         _maxUploadRateKiB = settings.MaxUploadRateKiB;
         _maxConnections = settings.MaxConnections;
@@ -36,6 +42,15 @@ public sealed partial class SettingsViewModel : ViewModelBase
     [ObservableProperty] private string _downloadDirectory;
     [ObservableProperty] private int _listenPort;
     [ObservableProperty] private NetworkInterfaceChoice _selectedNetworkInterface;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsProxyEnabled))]
+    private ProxyModeChoice _selectedProxyMode;
+
+    [ObservableProperty] private string _proxyHost;
+    [ObservableProperty] private int _proxyPort;
+    [ObservableProperty] private string _proxyUsername;
+    [ObservableProperty] private string _proxyPassword;
     [ObservableProperty] private int _maxDownloadRateKiB;
     [ObservableProperty] private int _maxUploadRateKiB;
     [ObservableProperty] private int _maxConnections;
@@ -53,6 +68,11 @@ public sealed partial class SettingsViewModel : ViewModelBase
     /// <summary>"Any", plus every interface the machine currently has.</summary>
     public IReadOnlyList<NetworkInterfaceChoice> NetworkInterfaces { get; }
 
+    public IReadOnlyList<ProxyModeChoice> ProxyModes { get; }
+
+    /// <summary>Greys out the proxy address fields while no proxy is selected.</summary>
+    public bool IsProxyEnabled => SelectedProxyMode.Mode != ProxyMode.None;
+
     public string CacheDirectory => SettingsService.AppDataDirectory;
 
     public event Action<bool>? Completed;
@@ -62,6 +82,11 @@ public sealed partial class SettingsViewModel : ViewModelBase
         DownloadDirectory = DownloadDirectory.Trim(),
         ListenPort = Math.Clamp(ListenPort, 1024, 65535),
         NetworkInterface = SelectedNetworkInterface.Name,
+        ProxyMode = SelectedProxyMode.Mode,
+        ProxyHost = ProxyHost.Trim(),
+        ProxyPort = Math.Clamp(ProxyPort, 1, 65535),
+        ProxyUsername = ProxyUsername.Trim(),
+        ProxyPassword = ProxyPassword,
         MaxDownloadRateKiB = Math.Max(0, MaxDownloadRateKiB),
         MaxUploadRateKiB = Math.Max(0, MaxUploadRateKiB),
         MaxConnections = Math.Clamp(MaxConnections, 10, 2000),
@@ -127,4 +152,25 @@ public sealed class NetworkInterfaceChoice
 
         return choices;
     }
+}
+
+/// <summary>One entry in the proxy type list.</summary>
+public sealed class ProxyModeChoice
+{
+    private ProxyModeChoice(ProxyMode mode, string display)
+    {
+        Mode = mode;
+        Display = display;
+    }
+
+    public ProxyMode Mode { get; }
+
+    public string Display { get; }
+
+    public static IReadOnlyList<ProxyModeChoice> All { get; } =
+    [
+        new(ProxyMode.None, "No proxy"),
+        new(ProxyMode.Socks5, "SOCKS5"),
+        new(ProxyMode.Http, "HTTP (CONNECT)"),
+    ];
 }

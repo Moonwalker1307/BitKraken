@@ -68,9 +68,31 @@ public sealed class SettingsService
         Directory.CreateDirectory(_directory);
         Directory.CreateDirectory(settings.DownloadDirectory);
 
-        await using var stream = File.Create(_settingsPath);
-        await JsonSerializer.SerializeAsync(stream, settings, JsonOptions);
+        await using (var stream = File.Create(_settingsPath))
+            await JsonSerializer.SerializeAsync(stream, settings, JsonOptions);
+
+        RestrictToOwner(_settingsPath);
 
         Changed?.Invoke(this, EventArgs.Empty);
+    }
+
+    /// <summary>
+    /// settings.json holds the proxy password in plain text, so on macOS and Linux it is written
+    /// readable by its owner only. Windows has no cheap equivalent - the per-user AppData folder is
+    /// the protection there.
+    /// </summary>
+    private static void RestrictToOwner(string path)
+    {
+        if (OperatingSystem.IsWindows()) return;
+
+        try
+        {
+            File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+        }
+        catch
+        {
+            // A filesystem that won't take a mode (a network share, some containers) is not worth
+            // failing the save over.
+        }
     }
 }

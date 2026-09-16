@@ -204,6 +204,46 @@
                         </Grid>
                     </Border>
 
+                    <TextBlock Text="PROXY" Classes="section" />
+                    <Border Classes="row">
+                        <Grid ColumnDefinitions="*,Auto">
+                            <StackPanel>
+                                <TextBlock Text="Proxy type" />
+                                <TextBlock Text="Sends peer connections and tracker announces through a proxy. While one is set, DHT, local peer discovery, UDP trackers and incoming connections are off - none of them can go through it." Classes="hint" />
+                            </StackPanel>
+                            <ComboBox Grid.Column="1" Width="220" MinHeight="34" VerticalAlignment="Center"
+                                      ItemsSource="{Binding ProxyModes}"
+                                      SelectedItem="{Binding SelectedProxyMode}">
+                                <ComboBox.ItemTemplate>
+                                    <DataTemplate x:DataType="vm:ProxyModeChoice">
+                                        <TextBlock Text="{Binding Display}" TextTrimming="CharacterEllipsis" />
+                                    </DataTemplate>
+                                </ComboBox.ItemTemplate>
+                            </ComboBox>
+                        </Grid>
+                    </Border>
+                    <Border Classes="row" IsEnabled="{Binding IsProxyEnabled}">
+                        <Grid ColumnDefinitions="*,Auto">
+                            <TextBlock Text="Proxy address" VerticalAlignment="Center" />
+                            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6">
+                                <TextBox Text="{Binding ProxyHost}" Width="160" Watermark="host or IP" />
+                                <NumericUpDown Value="{Binding ProxyPort}" Minimum="1" Maximum="65535" Increment="1" Width="110" />
+                            </StackPanel>
+                        </Grid>
+                    </Border>
+                    <Border Classes="row" IsEnabled="{Binding IsProxyEnabled}">
+                        <Grid ColumnDefinitions="*,Auto">
+                            <StackPanel>
+                                <TextBlock Text="Proxy sign-in" />
+                                <TextBlock Text="Leave blank if the proxy doesn't need it. Kept in settings.json as plain text." Classes="hint" />
+                            </StackPanel>
+                            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6">
+                                <TextBox Text="{Binding ProxyUsername}" Width="130" Watermark="username" />
+                                <TextBox Text="{Binding ProxyPassword}" Width="140" Watermark="password" PasswordChar="●" />
+                            </StackPanel>
+                        </Grid>
+                    </Border>
+
                     <TextBlock Text="APPEARANCE" Classes="section" />
                     <Border Classes="row">
                         <Grid ColumnDefinitions="*,Auto">

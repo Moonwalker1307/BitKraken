@@ -30,6 +30,12 @@ public class SettingsServiceTests
         saved.AutoStartMagnetFromClipboard = false;
         saved.HandleMagnetLinks = false;
         saved.AnimatedBackground = false;
+        saved.NetworkInterface = "wg0";
+        saved.ProxyMode = ProxyMode.Socks5;
+        saved.ProxyHost = "127.0.0.1";
+        saved.ProxyPort = 9050;
+        saved.ProxyUsername = "user";
+        saved.ProxyPassword = "secret";
 
         await new SettingsService(dir).SaveAsync(saved);
 
@@ -52,6 +58,12 @@ public class SettingsServiceTests
         Assert.False(loaded.AutoStartMagnetFromClipboard);
         Assert.False(loaded.HandleMagnetLinks);
         Assert.False(loaded.AnimatedBackground);
+        Assert.Equal("wg0", loaded.NetworkInterface);
+        Assert.Equal(ProxyMode.Socks5, loaded.ProxyMode);
+        Assert.Equal("127.0.0.1", loaded.ProxyHost);
+        Assert.Equal(9050, loaded.ProxyPort);
+        Assert.Equal("user", loaded.ProxyUsername);
+        Assert.Equal("secret", loaded.ProxyPassword);
     }
 
     [Fact]

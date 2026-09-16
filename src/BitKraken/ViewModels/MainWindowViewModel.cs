@@ -80,6 +80,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase
     [ObservableProperty] private string _dhtStatusText = "DHT: off";
     [ObservableProperty] private string _networkStatusText = "";
     [ObservableProperty] private bool _isNetworkBlocked;
+    [ObservableProperty] private string _proxyStatusText = "";
+    [ObservableProperty] private bool _isProxied;
     [ObservableProperty] private string _listenPortText = "";
     [ObservableProperty] private string _connectionsText = "0 peers";
     [ObservableProperty] private double[] _downloadSamples = [];
@@ -139,8 +141,14 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         AnimatedBackground = _settings.Current.AnimatedBackground;
 
         var binding = _binding.Current;
-        ListenPortText = binding.IsBound
-            ? $"Port {_settings.Current.ListenPort} · {binding.Describe()}"
+        var proxy = ProxyConfiguration.From(_settings.Current);
+
+        IsProxied = proxy.IsEnabled;
+        ProxyStatusText = proxy.Describe();
+
+        // No listener while proxying, so quoting a port would be a lie.
+        ListenPortText = proxy.IsEnabled ? "Proxied"
+            : binding.IsBound ? $"Port {_settings.Current.ListenPort} · {binding.Describe()}"
             : $"Port {_settings.Current.ListenPort}";
 
         if (IsNetworkBlocked)
@@ -242,7 +250,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         DownloadSamples = _downloadHistory.ToArray();
         UploadSamples = _uploadHistory.ToArray();
 
-        DhtStatusText = !_settings.Current.EnableDht ? "DHT: off"
+        DhtStatusText = IsProxied ? "DHT: off (proxy)"
+            : !_settings.Current.EnableDht ? "DHT: off"
             : engine.Dht.State switch
             {
                 DhtState.Ready => $"DHT: {engine.Dht.NodeCount:N0} nodes",
