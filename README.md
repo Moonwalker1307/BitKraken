@@ -147,11 +147,13 @@ Supported RIDs: `win-x64`, `win-arm64`, `linux-x64`, `linux-arm64`, `osx-x64`, `
 
 ## Installers
 
-macOS gets a real `.app` bundle plus installers; Windows and Linux get a self-contained single-file build in an
-archive. Build them locally with:
+macOS gets a real `.app` bundle plus installers and Windows a setup `.exe`; every platform also gets a
+self-contained single-file build in an archive, for anyone who would rather not install anything. Build them
+locally with:
 
 ```bash
 scripts/package-macos.sh osx-arm64 1.0.0      # .dmg + .pkg
+scripts/package-windows.sh win-x64 1.0.0      # setup .exe   (Windows only, needs Inno Setup 6)
 scripts/package-portable.sh win-x64 1.0.0     # .zip
 scripts/package-portable.sh linux-x64 1.0.0   # .tar.gz
 ```
@@ -161,7 +163,7 @@ Everything lands in `dist/`:
 | Platform | RID | Packages |
 | --- | --- | --- |
 | macOS (Apple Silicon) | `osx-arm64` | `.dmg` (drag-to-Applications) and `.pkg` (installer), from a `BitKraken.app` bundle that registers the `.torrent` file type and `magnet:` URL scheme |
-| Windows | `win-x64`, `win-arm64` | `.zip` |
+| Windows | `win-x64`, `win-arm64` | `-setup.exe` (Start Menu shortcut, optional desktop icon and `.torrent` association, clean uninstall; installs per-user without admin, or for all users) and `.zip` (portable) |
 | Linux | `linux-x64`, `linux-arm64` | `.tar.gz` |
 
 The [installers workflow](.github/workflows/installers.yml) builds all five in parallel on macOS, Windows and Linux
