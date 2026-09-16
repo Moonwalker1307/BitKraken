@@ -13,6 +13,7 @@ namespace BitKraken;
 public partial class App : Application
 {
     public static SettingsService Settings { get; private set; } = null!;
+    public static NetworkBinding Network { get; private set; } = null!;
     public static TorrentService Torrents { get; private set; } = null!;
 
     /// <summary>Torrents/magnets handed to us before the engine was ready to take them.</summary>
@@ -37,11 +38,12 @@ public partial class App : Application
         Settings = new SettingsService();
         Settings.Load();
 
-        Torrents = new TorrentService(Settings);
+        Network = new NetworkBinding(Settings);
+        Torrents = new TorrentService(Settings, Network);
 
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
-            var vm = new MainWindowViewModel(Torrents, Settings);
+            var vm = new MainWindowViewModel(Torrents, Settings, Network);
             var window = new MainWindow { DataContext = vm };
             _viewModel = vm;
             _mainWindow = window;

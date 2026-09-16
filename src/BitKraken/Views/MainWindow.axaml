@@ -472,6 +472,12 @@
                     </StackPanel>
                     <TextBlock Text="{Binding DhtStatusText}" Classes="muted" FontSize="11" />
                     <TextBlock Text="{Binding ConnectionsText}" Classes="muted" FontSize="11" />
+                    <TextBlock Text="{Binding ProxyStatusText}" Classes="muted" FontSize="11" IsVisible="{Binding IsProxied}" />
+                    <StackPanel Orientation="Horizontal" Spacing="6" IsVisible="{Binding IsNetworkBlocked}">
+                        <Ellipse Width="7" Height="7" Fill="{StaticResource Kraken.AmberBrush}" />
+                        <TextBlock Text="{Binding NetworkStatusText}" FontSize="11"
+                                   Foreground="{StaticResource Kraken.AmberBrush}" />
+                    </StackPanel>
                 </StackPanel>
                 <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="14" VerticalAlignment="Center">
                     <StackPanel Orientation="Horizontal" Spacing="5">

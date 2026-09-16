@@ -14,6 +14,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
 
     private readonly TorrentService _service;
     private readonly SettingsService _settings;
+    private readonly NetworkBinding _binding;
     private readonly DispatcherTimer _tick;
     private readonly Queue<double> _downloadHistory = new();
     private readonly Queue<double> _uploadHistory = new();
@@ -23,14 +24,17 @@ public sealed partial class MainWindowViewModel : ViewModelBase
 
     public IDialogService? Dialogs { get; set; }
 
-    public MainWindowViewModel(TorrentService service, SettingsService settings)
+    public MainWindowViewModel(TorrentService service, SettingsService settings, NetworkBinding binding)
     {
         _service = service;
         _settings = settings;
+        _binding = binding;
+        _binding.Changed += (_, _) => Dispatcher.UIThread.Post(ApplyUiSettings);
 
         _service.TorrentAdded += (_, m) => Dispatcher.UIThread.Post(() => OnTorrentAdded(m));
         _service.TorrentRemoved += (_, m) => Dispatcher.UIThread.Post(() => OnTorrentRemoved(m));
         _service.EngineError += (_, msg) => Dispatcher.UIThread.Post(() => ShowToast("Engine", msg, isError: true));
+        _service.NetworkSuspendedChanged += (_, suspended) => Dispatcher.UIThread.Post(() => OnNetworkSuspendedChanged(suspended));
         _settings.Changed += (_, _) => Dispatcher.UIThread.Post(ApplyUiSettings);
 
         for (var i = 0; i < HistoryLength; i++)
@@ -74,6 +78,10 @@ public sealed partial class MainWindowViewModel : ViewModelBase
     [ObservableProperty] private string _totalDownloadRateText = "0 B/s";
     [ObservableProperty] private string _totalUploadRateText = "0 B/s";
     [ObservableProperty] private string _dhtStatusText = "DHT: off";
+    [ObservableProperty] private string _networkStatusText = "";
+    [ObservableProperty] private bool _isNetworkBlocked;
+    [ObservableProperty] private string _proxyStatusText = "";
+    [ObservableProperty] private bool _isProxied;
     [ObservableProperty] private string _listenPortText = "";
     [ObservableProperty] private string _connectionsText = "0 peers";
     [ObservableProperty] private double[] _downloadSamples = [];
@@ -97,7 +105,10 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         {
             await _service.InitializeAsync();
             IsEngineReady = true;
-            ListenPortText = $"Port {_settings.Current.ListenPort}";
+            ApplyUiSettings();
+
+            // The tunnel can already be down before we ever start, so take the state the engine came up in.
+            if (_service.IsNetworkSuspended) OnNetworkSuspendedChanged(true);
             _tick.Start();
         }
         catch (Exception ex)
@@ -128,7 +139,38 @@ public sealed partial class MainWindowViewModel : ViewModelBase
     private void ApplyUiSettings()
     {
         AnimatedBackground = _settings.Current.AnimatedBackground;
-        ListenPortText = $"Port {_settings.Current.ListenPort}";
+
+        var binding = _binding.Current;
+        var proxy = ProxyConfiguration.From(_settings.Current);
+
+        IsProxied = proxy.IsEnabled;
+        ProxyStatusText = proxy.Describe();
+
+        // No listener while proxying, so quoting a port would be a lie.
+        ListenPortText = proxy.IsEnabled ? "Proxied"
+            : binding.IsBound ? $"Port {_settings.Current.ListenPort} · {binding.Describe()}"
+            : $"Port {_settings.Current.ListenPort}";
+
+        if (IsNetworkBlocked)
+            NetworkStatusText = $"{binding.InterfaceName} is down - torrents held";
+    }
+
+    /// <summary>The kill switch tripped or lifted: say so in the status bar, and once as a toast.</summary>
+    private void OnNetworkSuspendedChanged(bool suspended)
+    {
+        IsNetworkBlocked = suspended;
+        var name = _binding.Current.InterfaceName;
+
+        if (suspended)
+        {
+            NetworkStatusText = $"{name} is down - torrents held";
+            ShowToast("Network gone", $"{name} is down. Torrents are held until it is back.", isError: true);
+        }
+        else
+        {
+            NetworkStatusText = "";
+            ShowToast("Network back", $"{name} is up again. Torrents are resuming.", isError: false);
+        }
     }
 
     private void OnTorrentAdded(TorrentManager manager)
@@ -208,7 +250,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         DownloadSamples = _downloadHistory.ToArray();
         UploadSamples = _uploadHistory.ToArray();
 
-        DhtStatusText = !_settings.Current.EnableDht ? "DHT: off"
+        DhtStatusText = IsProxied ? "DHT: off (proxy)"
+            : !_settings.Current.EnableDht ? "DHT: off"
             : engine.Dht.State switch
             {
                 DhtState.Ready => $"DHT: {engine.Dht.NodeCount:N0} nodes",

@@ -41,6 +41,9 @@ public class AppSettingsTests
         Assert.True(settings.AddFallbackTrackers);
         Assert.True(settings.StartTorrentsAutomatically);
         Assert.True(settings.HandleMagnetLinks);
+        Assert.Equal("", settings.NetworkInterface);   // no interface binding until the user picks one
+        Assert.Equal(ProxyMode.None, settings.ProxyMode);
+        Assert.Equal(1080, settings.ProxyPort);        // the usual SOCKS5 port, once a proxy is chosen
         Assert.False(string.IsNullOrWhiteSpace(settings.DownloadDirectory));
     }
 }

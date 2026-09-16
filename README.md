@@ -18,6 +18,13 @@ real-time transfer graphs.
 - **Fast first peers** — a small set of well-known public trackers is appended to public torrents as they're added,
   which is usually the biggest cut to a magnet's time-to-first-peer. Never applied to private torrents; toggle in
   Settings.
+- **Bind to an interface** — pin peer connections, HTTP tracker announces and DHT to one network interface.
+  Point it at your VPN tunnel and nothing takes your normal connection instead.
+- **Kill switch** — if the bound interface drops, torrents are held and connections refused until it is
+  back, then the ones it stopped start again on their own.
+- **SOCKS5 / HTTP proxy** — send peers and trackers through a proxy, with the hostname resolved at the
+  far end. UDP trackers, DHT, local peer discovery and the incoming listener switch off while it's on,
+  because a TCP proxy can't carry them.
 - **Details panel** — overview (piece map + speed graph + stats), files (priority / skip), peers, trackers.
 - **Filters & search** — All / Downloading / Seeding / Completed / Paused / Errors, plus instant name search.
 - **Per-torrent actions** — resume, pause, force re-check, open folder, copy magnet link and remove, from the
@@ -43,6 +50,67 @@ Each desktop delivers the link differently, and BitKraken registers itself for a
 
 Turning **Settings → Open magnet links from the browser** off removes the association again (on Windows and Linux;
 on macOS it belongs to the bundle). Move or re-install the app and the association follows it on the next start.
+
+## Binding to a VPN (or any interface)
+
+**Settings → Bind to network interface** pins BitKraken to one interface — typically the tunnel your VPN
+client creates (`wg0`, `tun0`, `utun4`, "ProtonVPN"). While it is set:
+
+- the peer listener binds to that interface's address instead of `0.0.0.0`, so incoming connections can
+  only arrive over it;
+- outgoing peer connections are bound to it as well. This is the part that matters: the routing table,
+  not the listening socket, decides where an outgoing connection leaves from, so binding only the
+  listener would still put peer traffic on your normal connection;
+- HTTP(S) tracker announces go out of it too — an announce carries your IP as surely as a peer does;
+- DHT binds its socket to it;
+- UPnP/NAT-PMP port forwarding is switched off, because a mapping to a VPN address does nothing and the
+  request itself tells your router what you're up to.
+
+The address family follows the interface: bind to a tunnel with no IPv6 and BitKraken makes no IPv6
+connections at all.
+
+### The kill switch
+
+If the bound interface disappears — the tunnel drops — BitKraken doesn't fall back to your real
+connection. It stops every torrent that was running, drops its listeners, and refuses to open new
+connections; the status bar says which interface is down. When the interface comes back it rebinds and
+restarts exactly the torrents it stopped. Torrents you paused yourself stay paused, and a torrent you
+start while the tunnel is down is queued rather than sent out over the wrong interface.
+
+The interface list is re-read every five seconds as well as on the OS's own network-change events, since
+those don't fire reliably for tunnel interfaces on every platform.
+
+Two things still follow the system routing table, and they will use your normal connection if your VPN is
+*not* the default route (a split tunnel): UDP tracker announces, which MonoTorrent sends from an unbound
+socket, and DNS lookups for tracker hostnames. In the usual setup, where the VPN *is* the default route,
+they go over the tunnel like everything else.
+
+## Proxy
+
+**Settings → Proxy** sends peer connections and tracker announces through a SOCKS5 (RFC 1928) or HTTP
+CONNECT proxy — the kind VPN providers hand out for torrent clients. Username/password authentication is
+supported for both (RFC 1929 and Basic, respectively).
+
+Target hostnames are handed to the proxy to resolve rather than looked up here, so tracker names don't
+leak as DNS queries from your machine. If the proxy is selected but misconfigured, connections fail with
+the proxy's own error — BitKraken never falls back to a direct connection.
+
+A SOCKS5 or HTTP proxy carries TCP only, so while one is set BitKraken turns off everything that isn't:
+
+| | Why |
+| --- | --- |
+| UDP trackers | UDP can't cross the proxy. They stay in the tracker list, marked as not announced, rather than silently announcing from your own address — the bundled public trackers are all UDP, so expect them to sit idle. |
+| DHT | Also UDP. |
+| Local peer discovery | A multicast shout on the LAN, which no proxy can carry. |
+| Incoming connections | The listener is stopped: a peer reaching your real address defeats the point. |
+| UPnP / NAT-PMP | Nothing to forward while nothing is listening. |
+
+That leaves HTTP(S) trackers and outgoing peer connections, which is the usual trade for a proxy.
+Binding and a proxy compose: the connection to the proxy itself is made from the bound interface.
+
+The proxy password is stored in `settings.json` in plain text, like the rest of your settings. On macOS
+and Linux that file is written readable by its owner only; on Windows the per-user AppData folder is the
+protection.
 
 ## Requirements
 
