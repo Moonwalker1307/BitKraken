@@ -141,6 +141,23 @@
                     <Border Classes="row">
                         <Grid ColumnDefinitions="*,Auto">
                             <StackPanel>
+                                <TextBlock Text="Bind to network interface" />
+                                <TextBlock Text="Send all torrent traffic out of one interface - pick your VPN tunnel and nothing leaves over your normal connection." Classes="hint" />
+                            </StackPanel>
+                            <ComboBox Grid.Column="1" Width="220" MinHeight="34" VerticalAlignment="Center"
+                                      ItemsSource="{Binding NetworkInterfaces}"
+                                      SelectedItem="{Binding SelectedNetworkInterface}">
+                                <ComboBox.ItemTemplate>
+                                    <DataTemplate x:DataType="vm:NetworkInterfaceChoice">
+                                        <TextBlock Text="{Binding Display}" TextTrimming="CharacterEllipsis" />
+                                    </DataTemplate>
+                                </ComboBox.ItemTemplate>
+                            </ComboBox>
+                        </Grid>
+                    </Border>
+                    <Border Classes="row">
+                        <Grid ColumnDefinitions="*,Auto">
+                            <StackPanel>
                                 <TextBlock Text="DHT (distributed hash table)" />
                                 <TextBlock Text="Find peers without a tracker." Classes="hint" />
                             </StackPanel>

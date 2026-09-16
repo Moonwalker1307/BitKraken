@@ -14,6 +14,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
 
     private readonly TorrentService _service;
     private readonly SettingsService _settings;
+    private readonly NetworkBinding _binding;
     private readonly DispatcherTimer _tick;
     private readonly Queue<double> _downloadHistory = new();
     private readonly Queue<double> _uploadHistory = new();
@@ -23,10 +24,12 @@ public sealed partial class MainWindowViewModel : ViewModelBase
 
     public IDialogService? Dialogs { get; set; }
 
-    public MainWindowViewModel(TorrentService service, SettingsService settings)
+    public MainWindowViewModel(TorrentService service, SettingsService settings, NetworkBinding binding)
     {
         _service = service;
         _settings = settings;
+        _binding = binding;
+        _binding.Changed += (_, _) => Dispatcher.UIThread.Post(ApplyUiSettings);
 
         _service.TorrentAdded += (_, m) => Dispatcher.UIThread.Post(() => OnTorrentAdded(m));
         _service.TorrentRemoved += (_, m) => Dispatcher.UIThread.Post(() => OnTorrentRemoved(m));
@@ -97,7 +100,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         {
             await _service.InitializeAsync();
             IsEngineReady = true;
-            ListenPortText = $"Port {_settings.Current.ListenPort}";
+            ApplyUiSettings();
             _tick.Start();
         }
         catch (Exception ex)
@@ -128,7 +131,11 @@ public sealed partial class MainWindowViewModel : ViewModelBase
     private void ApplyUiSettings()
     {
         AnimatedBackground = _settings.Current.AnimatedBackground;
-        ListenPortText = $"Port {_settings.Current.ListenPort}";
+
+        var binding = _binding.Current;
+        ListenPortText = binding.IsBound
+            ? $"Port {_settings.Current.ListenPort} · {binding.Describe()}"
+            : $"Port {_settings.Current.ListenPort}";
     }
 
     private void OnTorrentAdded(TorrentManager manager)

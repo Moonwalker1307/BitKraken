@@ -41,6 +41,7 @@ public class AppSettingsTests
         Assert.True(settings.AddFallbackTrackers);
         Assert.True(settings.StartTorrentsAutomatically);
         Assert.True(settings.HandleMagnetLinks);
+        Assert.Equal("", settings.NetworkInterface);   // no interface binding until the user picks one
         Assert.False(string.IsNullOrWhiteSpace(settings.DownloadDirectory));
     }
 }

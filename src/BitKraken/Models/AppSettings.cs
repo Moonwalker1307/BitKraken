@@ -8,6 +8,13 @@ public sealed class AppSettings
 
     public int ListenPort { get; set; } = 51413;
 
+    /// <summary>
+    /// Name of the network interface all torrent traffic must leave from ("wg0", "utun4", "Wi-Fi").
+    /// Empty means whatever the routing table picks. Point it at a VPN tunnel and BitKraken stops
+    /// talking to peers and trackers the moment that tunnel is gone.
+    /// </summary>
+    public string NetworkInterface { get; set; } = "";
+
     /// <summary>Global download cap in KiB/s. 0 = unlimited.</summary>
     public int MaxDownloadRateKiB { get; set; }
 

@@ -1,9 +1,11 @@
 using System.Net;
+using System.Net.Sockets;
 using System.Text.Json;
 using BitKraken.Models;
 using MonoTorrent;
 using MonoTorrent.Client;
 using MonoTorrent.Connections;
+using MonoTorrent.Connections.Peer;
 
 namespace BitKraken.Services;
 
@@ -30,15 +32,30 @@ public sealed class TorrentService : IAsyncDisposable
     ];
 
     private readonly SettingsService _settings;
+    private readonly NetworkBinding _binding;
+    private readonly Factories _factories;
     private readonly HashSet<string> _pausedByUser = new(StringComparer.OrdinalIgnoreCase);
     private readonly SemaphoreSlim _stateLock = new(1, 1);
     private ClientEngine? _engine;
     private bool _shuttingDown;
 
-    public TorrentService(SettingsService settings)
+    public TorrentService(SettingsService settings, NetworkBinding binding)
     {
         _settings = settings;
+        _binding = binding;
+
+        // Every socket the engine opens goes through these, so an interface binding covers peers and
+        // trackers alike. They read the binding per connection, which is what lets it change at runtime.
+        var connector = new BoundSocketConnector(binding);
+        var httpClients = new BoundHttpClientFactory(binding);
+        _factories = Factories.Default
+            .WithPeerConnectionCreator("ipv4", uri => new SocketPeerConnection(uri, connector))
+            .WithPeerConnectionCreator("ipv6", uri => new SocketPeerConnection(uri, connector))
+            .WithSocketConnectorCreator(() => connector)
+            .WithHttpClientCreator(httpClients.Create);
+
         _settings.Changed += async (_, _) => await ApplySettingsAsync();
+        _binding.Changed += async (_, _) => await ApplySettingsAsync();
     }
 
     public ClientEngine Engine => _engine ?? throw new InvalidOperationException("Engine not initialised.");
@@ -60,7 +77,7 @@ public sealed class TorrentService : IAsyncDisposable
         {
             try
             {
-                engine = await ClientEngine.RestoreStateAsync(SettingsService.EngineStatePath);
+                engine = await ClientEngine.RestoreStateAsync(SettingsService.EngineStatePath, _factories);
                 await engine.UpdateSettingsAsync(BuildEngineSettings(_settings.Current));
             }
             catch (Exception ex)
@@ -71,7 +88,7 @@ public sealed class TorrentService : IAsyncDisposable
             }
         }
 
-        engine ??= new ClientEngine(BuildEngineSettings(_settings.Current));
+        engine ??= new ClientEngine(BuildEngineSettings(_settings.Current), _factories);
         engine.CriticalException += (_, e) => EngineError?.Invoke(this, e.Exception.Message);
         _engine = engine;
 
@@ -321,11 +338,25 @@ public sealed class TorrentService : IAsyncDisposable
         }
     }
 
-    private static EngineSettings BuildEngineSettings(AppSettings s)
+    private EngineSettings BuildEngineSettings(AppSettings s)
     {
+        var binding = _binding.Current;
+        var listenV4 = binding.ListenAddress(AddressFamily.InterNetwork);
+        var listenV6 = binding.ListenAddress(AddressFamily.InterNetworkV6);
+
+        // A family the bound interface doesn't have gets no listener at all - an "any" listener would
+        // accept peers on every other interface, which is the leak binding is meant to close.
+        var listenEndPoints = new Dictionary<string, IPEndPoint>();
+        if (listenV4 is not null) listenEndPoints["ipv4"] = new IPEndPoint(listenV4, s.ListenPort);
+        if (listenV6 is not null) listenEndPoints["ipv6"] = new IPEndPoint(listenV6, s.ListenPort);
+
+        var dhtAddress = listenV4 ?? listenV6;
+
         var builder = new EngineSettingsBuilder
         {
-            AllowPortForwarding = s.EnablePortForwarding,
+            // Asking the router to forward a port to a VPN address is meaningless, and the request
+            // itself tells the LAN what we're doing, so it goes off whenever we're bound.
+            AllowPortForwarding = s.EnablePortForwarding && !binding.IsBound,
             AllowLocalPeerDiscovery = s.EnableLocalPeerDiscovery,
             AutoSaveLoadDhtCache = true,
             AutoSaveLoadFastResume = true,
@@ -334,12 +365,8 @@ public sealed class TorrentService : IAsyncDisposable
             MaximumConnections = Math.Max(10, s.MaxConnections),
             MaximumDownloadRate = Math.Max(0, s.MaxDownloadRateKiB) * 1024,
             MaximumUploadRate = Math.Max(0, s.MaxUploadRateKiB) * 1024,
-            ListenEndPoints = new Dictionary<string, IPEndPoint>
-            {
-                ["ipv4"] = new(IPAddress.Any, s.ListenPort),
-                ["ipv6"] = new(IPAddress.IPv6Any, s.ListenPort),
-            },
-            DhtEndPoint = s.EnableDht ? new IPEndPoint(IPAddress.Any, s.ListenPort) : null,
+            ListenEndPoints = listenEndPoints,
+            DhtEndPoint = s.EnableDht && dhtAddress is not null ? new IPEndPoint(dhtAddress, s.ListenPort) : null,
         };
 
         if (s.RequireEncryption)

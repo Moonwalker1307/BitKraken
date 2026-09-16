@@ -18,6 +18,9 @@ real-time transfer graphs.
 - **Fast first peers** — a small set of well-known public trackers is appended to public torrents as they're added,
   which is usually the biggest cut to a magnet's time-to-first-peer. Never applied to private torrents; toggle in
   Settings.
+- **Bind to an interface** — pin peer connections, HTTP tracker announces and DHT to one network interface.
+  Point it at your VPN tunnel and they stop the moment the tunnel does, instead of falling back to your
+  real connection.
 - **Details panel** — overview (piece map + speed graph + stats), files (priority / skip), peers, trackers.
 - **Filters & search** — All / Downloading / Seeding / Completed / Paused / Errors, plus instant name search.
 - **Per-torrent actions** — resume, pause, force re-check, open folder, copy magnet link and remove, from the
@@ -43,6 +46,30 @@ Each desktop delivers the link differently, and BitKraken registers itself for a
 
 Turning **Settings → Open magnet links from the browser** off removes the association again (on Windows and Linux;
 on macOS it belongs to the bundle). Move or re-install the app and the association follows it on the next start.
+
+## Binding to a VPN (or any interface)
+
+**Settings → Bind to network interface** pins BitKraken to one interface — typically the tunnel your VPN
+client creates (`wg0`, `tun0`, `utun4`, "ProtonVPN"). While it is set:
+
+- the peer listener binds to that interface's address instead of `0.0.0.0`, so incoming connections can
+  only arrive over it;
+- outgoing peer connections are bound to it as well. This is the part that matters: the routing table,
+  not the listening socket, decides where an outgoing connection leaves from, so binding only the
+  listener would still put peer traffic on your normal connection;
+- HTTP(S) tracker announces go out of it too — an announce carries your IP as surely as a peer does;
+- DHT binds its socket to it;
+- UPnP/NAT-PMP port forwarding is switched off, because a mapping to a VPN address does nothing and the
+  request itself tells your router what you're up to.
+
+If the interface disappears — the tunnel drops — BitKraken stops listening and refuses to open new
+connections rather than falling back to your real one. The address family follows the interface: bind to
+a tunnel with no IPv6 and BitKraken makes no IPv6 connections at all.
+
+Two things still follow the system routing table, and they will use your normal connection if your VPN is
+*not* the default route (a split tunnel): UDP tracker announces, which MonoTorrent sends from an unbound
+socket, and DNS lookups for tracker hostnames. In the usual setup, where the VPN *is* the default route,
+they go over the tunnel like everything else.
 
 ## Requirements
 
