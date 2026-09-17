@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Sockets;
 using BitKraken.Models;
@@ -33,6 +34,16 @@ public sealed class TorrentService : IAsyncDisposable
     private static readonly TimeSpan PreferenceSaveInterval = TimeSpan.FromSeconds(30);
 
     /// <summary>
+    /// How long stopping a torrent waits for the tracker to acknowledge the final "stopped" announce.
+    /// None, because there is nothing to wait for: MonoTorrent has already sent the announce by the time
+    /// this timeout applies, and lets it finish on its own afterwards - removing a torrent and disposing
+    /// it do not cancel it. The stop itself still completes properly, closing peers and flushing files.
+    /// Waiting for a reply we do not read is what made removing a torrent take five seconds whenever one
+    /// of its trackers was slow or dead. Shutdown is the one place that does wait - see ShutdownAsync.
+    /// </summary>
+    private static readonly TimeSpan StopAnnounceWait = TimeSpan.Zero;
+
+    /// <summary>
     /// Picks pieces in order instead of rarest-first. Both of MonoTorrent's usual heuristics have to go:
     /// rarest-first reorders the whole torrent, and the randomiser shuffles whatever is left. File
     /// priorities are still honoured, so a file set to Highest is the one that fills up first.
@@ -62,14 +73,21 @@ public sealed class TorrentService : IAsyncDisposable
     private readonly SemaphoreSlim _networkLock = new(1, 1);
     private readonly SemaphoreSlim _reconcileLock = new(1, 1);
 
-    /// <summary>The picker each torrent was last given, so we only cycle one when the mode really changed.</summary>
-    private readonly Dictionary<string, bool> _appliedSequential = new(StringComparer.OrdinalIgnoreCase);
+    /// <summary>
+    /// The picker each torrent was last given, so we only cycle one when the mode really changed.
+    /// Concurrent because a reconcile pass now applies its decisions to several torrents at once, and
+    /// the UI thread reads it when the user toggles sequential mode.
+    /// </summary>
+    private readonly ConcurrentDictionary<string, bool> _appliedSequential = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>Last sample of each torrent's session counters, for turning them into running totals.</summary>
     private readonly Dictionary<string, (long Received, long Sent)> _lastCounters = new(StringComparer.OrdinalIgnoreCase);
 
-    /// <summary>Torrents the user restarted past their seeding limit. Session-only, and deliberately so.</summary>
-    private readonly HashSet<string> _seedLimitWaived = new(StringComparer.OrdinalIgnoreCase);
+    /// <summary>
+    /// Torrents the user restarted past their seeding limit. Session-only, and deliberately so. A set,
+    /// spelled as a dictionary because the UI thread adds to it while the reconcile timer reads it.
+    /// </summary>
+    private readonly ConcurrentDictionary<string, bool> _seedLimitWaived = new(StringComparer.OrdinalIgnoreCase);
 
     private Timer? _reconcileTimer;
     private ClientEngine? _engine;
@@ -235,7 +253,7 @@ public sealed class TorrentService : IAsyncDisposable
         // Starting a torrent by hand overrides its seeding limit for the rest of the session. Re-arming
         // it here would only stop the torrent again a second later, which is not what the click meant.
         if (SeedLimitFor(key).IsReached(RatioOf(manager), SeededFor(key)))
-            _seedLimitWaived.Add(key);
+            _seedLimitWaived[key] = true;
 
         _preferences.Save();
 
@@ -258,20 +276,24 @@ public sealed class TorrentService : IAsyncDisposable
         Forget(key);
         _preferences.Save();
 
+        // The engine refuses to unregister a torrent that is not stopped, so this has to finish first.
         if (manager.State != TorrentState.Stopped)
-            await manager.StopAsync(TimeSpan.FromSeconds(5));
+            await SafeStopAsync(manager);
 
         var mode = deleteData ? RemoveMode.CacheDataAndDownloadedData : RemoveMode.CacheDataOnly;
         await Engine.RemoveAsync(manager, mode);
         TorrentRemoved?.Invoke(this, manager);
         _ = SaveStateAsync();
-        await ReconcileAsync();
+
+        // The freed slot is the queue's problem, not this caller's: whoever asked for the removal should
+        // not be kept waiting while the next torrent in line starts up.
+        RequestReconcile();
     }
 
     public async Task RecheckAsync(TorrentManager manager)
     {
         if (manager.State != TorrentState.Stopped)
-            await manager.StopAsync();
+            await SafeStopAsync(manager);
 
         // The reconcile starts it again afterwards if it is still owed a slot, so the check itself
         // never jumps the queue.
@@ -294,7 +316,7 @@ public sealed class TorrentService : IAsyncDisposable
             });
 
             if (!paused && SeedLimitFor(key).IsReached(RatioOf(manager), SeededFor(key)))
-                _seedLimitWaived.Add(key);
+                _seedLimitWaived[key] = true;
         }
 
         _preferences.Save();
@@ -373,7 +395,7 @@ public sealed class TorrentService : IAsyncDisposable
             // A limit the user just widened should let the torrent seed again.
             e.SeedLimitReached = false;
         });
-        _seedLimitWaived.Remove(key);
+        _seedLimitWaived.TryRemove(key, out _);
         _preferences.Save();
 
         await ReconcileAsync();
@@ -449,6 +471,7 @@ public sealed class TorrentService : IAsyncDisposable
 
         _waiting = plan.Waiting;
 
+        List<Task>? actions = null;
         foreach (var manager in torrents)
         {
             if (_shuttingDown) return;
@@ -458,22 +481,31 @@ public sealed class TorrentService : IAsyncDisposable
                 // Error is deliberately not in here: restarting a failing torrent every two seconds
                 // would spin forever. Pressing Start clears the error and brings it back.
                 if (manager.State is TorrentState.Stopped or TorrentState.Paused)
-                {
-                    await ApplyPickerAsync(manager);
-                    await SafeStartAsync(manager);
-                }
+                    (actions ??= []).Add(StartWithPickerAsync(manager));
             }
             else if (ShouldStop(manager.State, suspended))
             {
-                await SafeStopAsync(manager);
+                (actions ??= []).Add(SafeStopAsync(manager));
             }
         }
+
+        // Started together rather than one after another. Each of these hops onto the engine's main
+        // loop, which serializes the work itself; what overlaps is the waiting, so lowering the queue
+        // limit on five running torrents settles in the time of the slowest stop, not the sum of five.
+        if (actions is not null) await Task.WhenAll(actions);
 
         if (DateTime.UtcNow - _lastPreferenceSave > PreferenceSaveInterval)
         {
             _lastPreferenceSave = DateTime.UtcNow;
             _preferences.Save();
         }
+    }
+
+    /// <summary>Gives a torrent the picker its mode calls for, then starts it. Both swallow their own errors.</summary>
+    private async Task StartWithPickerAsync(TorrentManager manager)
+    {
+        await ApplyPickerAsync(manager);
+        await SafeStartAsync(manager);
     }
 
     /// <summary>A torrent nobody has paused and nothing has finished with is owed a place in the queue.</summary>
@@ -542,7 +574,7 @@ public sealed class TorrentService : IAsyncDisposable
             if (!manager.Complete) continue;
 
             var key = Key(manager);
-            if (_seedLimitWaived.Contains(key)) continue;
+            if (_seedLimitWaived.ContainsKey(key)) continue;
 
             var overrides = _preferences.Get(key);
             var limit = SeedLimit.For(settings, overrides);
@@ -642,6 +674,9 @@ public sealed class TorrentService : IAsyncDisposable
         try
         {
             await SaveStateAsync();
+
+            // Unlike everywhere else, this one waits: the process is about to go, and an announce left
+            // in flight dies with it, leaving us listed on the tracker as a peer that never says goodbye.
             await _engine.StopAllAsync(TimeSpan.FromSeconds(5));
             // Fast-resume data is written during Stop; persist again so it lands in the state file.
             await _engine.SaveStateAsync(SettingsService.EngineStatePath);
@@ -837,9 +872,9 @@ public sealed class TorrentService : IAsyncDisposable
     private void Forget(string key)
     {
         _preferences.Forget(key);
-        _appliedSequential.Remove(key);
+        _appliedSequential.TryRemove(key, out _);
         _lastCounters.Remove(key);
-        _seedLimitWaived.Remove(key);
+        _seedLimitWaived.TryRemove(key, out _);
     }
 
     private async Task SafeStartAsync(TorrentManager manager)
@@ -859,7 +894,7 @@ public sealed class TorrentService : IAsyncDisposable
     {
         try
         {
-            await manager.StopAsync(TimeSpan.FromSeconds(5));
+            await manager.StopAsync(StopAnnounceWait);
         }
         catch
         {
