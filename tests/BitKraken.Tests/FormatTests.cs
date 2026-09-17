@@ -103,4 +103,32 @@ public class FormatTests
     {
         Assert.Equal("∞", Format.Ratio(uploaded: 1024, downloaded: 0));
     }
+
+    [Theory]
+    [InlineData(0, "0.00")]
+    [InlineData(1.5, "1.50")]
+    [InlineData(-1, "0.00")]              // a ratio can't be negative; don't render one that is
+    [InlineData(double.PositiveInfinity, "∞")]
+    [InlineData(double.NaN, "∞")]
+    public void A_ratio_already_worked_out_renders_the_same_way(double ratio, string expected) =>
+        Assert.Equal(expected, Format.Ratio(ratio));
+
+    [Theory]
+    [InlineData(0, "0m")]                 // "0m", not "0s": this is a stretch of time, not a countdown
+    [InlineData(-30, "0m")]
+    [InlineData(45, "45s")]
+    [InlineData(90, "1m")]
+    [InlineData(3600, "1h 0m")]
+    [InlineData(5430, "1h 30m")]
+    [InlineData(90000, "1d 1h")]
+    public void Duration_reads_as_time_already_spent(int seconds, string expected) =>
+        Assert.Equal(expected, Format.Duration(TimeSpan.FromSeconds(seconds)));
+
+    [Fact]
+    public void Duration_never_gives_up_the_way_an_eta_does()
+    {
+        // Eta calls anything past a month "∞" because it is a guess. Time already seeded is not.
+        Assert.Equal("∞", Format.Eta(TimeSpan.FromDays(60)));
+        Assert.Equal("60d 0h", Format.Duration(TimeSpan.FromDays(60)));
+    }
 }

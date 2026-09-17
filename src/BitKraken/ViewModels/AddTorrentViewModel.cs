@@ -103,7 +103,7 @@ public sealed partial class AddTorrentViewModel : ViewModelBase
     [RelayCommand]
     private async Task BrowseFolder()
     {
-        var folder = await _dialogs.PickFolderAsync(SaveDirectory);
+        var folder = await _dialogs.PickFolderAsync(SaveDirectory, "Choose where to save this torrent");
         if (folder is not null) SaveDirectory = folder;
     }
 

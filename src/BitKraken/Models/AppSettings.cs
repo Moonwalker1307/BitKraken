@@ -16,6 +16,17 @@ public enum ProxyMode
     Http,
 }
 
+/// <summary>What becomes of a <c>.torrent</c> file once the watch folder has handed it over.</summary>
+[JsonConverter(typeof(JsonStringEnumConverter<WatchFolderAction>))]
+public enum WatchFolderAction
+{
+    /// <summary>Rename it to <c>&lt;name&gt;.torrent.added</c>, which leaves the file but takes it out of the filter.</summary>
+    MarkAsAdded,
+
+    /// <summary>Delete it.</summary>
+    Delete,
+}
+
 /// <summary>User-configurable settings persisted to disk as JSON.</summary>
 public sealed class AppSettings
 {
@@ -78,6 +89,54 @@ public sealed class AppSettings
 
     /// <summary>Enable the animated aurora background. Can be turned off on low-end machines.</summary>
     public bool AnimatedBackground { get; set; } = true;
+
+    /// <summary>
+    /// How many torrents may download at once; the rest wait in the queue. 0 = no limit.
+    /// A torrent still fetching metadata counts as a download, because it is using the network.
+    /// </summary>
+    public int MaxActiveDownloads { get; set; } = 3;
+
+    /// <summary>
+    /// How many finished torrents may seed at once. 0 = no limit, which is the default: seeding costs
+    /// little, and a limit here would quietly stop torrents that were happily seeding before.
+    /// </summary>
+    public int MaxActiveSeeds { get; set; }
+
+    /// <summary>
+    /// Stop seeding once the share ratio reaches this. 0 = seed forever. Counted from the totals
+    /// BitKraken keeps per torrent, so it survives a restart.
+    /// </summary>
+    public double SeedRatioLimit { get; set; }
+
+    /// <summary>Stop seeding after this many minutes of seeding, added up across sessions. 0 = seed forever.</summary>
+    public int SeedTimeLimitMinutes { get; set; }
+
+    /// <summary>Download pieces in order for newly added torrents, so a partial file plays from the start.</summary>
+    public bool SequentialDownload { get; set; }
+
+    /// <summary>Put BitKraken in the system tray / menu bar.</summary>
+    public bool ShowTrayIcon { get; set; } = true;
+
+    /// <summary>Minimizing the window hides it to the tray instead.</summary>
+    public bool MinimizeToTray { get; set; }
+
+    /// <summary>
+    /// Closing the window hides it to the tray instead of quitting. Off by default: a desktop with no
+    /// tray would otherwise leave BitKraken running with no way to get the window back.
+    /// </summary>
+    public bool CloseToTray { get; set; }
+
+    /// <summary>Ask the desktop to show a notification when a torrent finishes.</summary>
+    public bool NotifyOnComplete { get; set; } = true;
+
+    /// <summary>Ask the desktop to show a notification when a torrent fails.</summary>
+    public bool NotifyOnError { get; set; } = true;
+
+    /// <summary>Folder watched for <c>.torrent</c> files to add. Empty means no watch folder.</summary>
+    public string WatchFolder { get; set; } = "";
+
+    /// <summary>What to do with a <c>.torrent</c> file once it has been added.</summary>
+    public WatchFolderAction WatchFolderAction { get; set; } = WatchFolderAction.MarkAsAdded;
 
     public AppSettings Clone() => (AppSettings)MemberwiseClone();
 }

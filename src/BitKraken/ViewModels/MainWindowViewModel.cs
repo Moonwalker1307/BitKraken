@@ -35,6 +35,9 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         _service.TorrentRemoved += (_, m) => Dispatcher.UIThread.Post(() => OnTorrentRemoved(m));
         _service.EngineError += (_, msg) => Dispatcher.UIThread.Post(() => ShowToast("Engine", msg, isError: true));
         _service.NetworkSuspendedChanged += (_, suspended) => Dispatcher.UIThread.Post(() => OnNetworkSuspendedChanged(suspended));
+        _service.TorrentCompleted += (_, m) => Dispatcher.UIThread.Post(() => OnTorrentCompleted(m));
+        _service.TorrentFailed += (_, m) => Dispatcher.UIThread.Post(() => OnTorrentFailed(m));
+        _service.SeedLimitReached += (_, m) => Dispatcher.UIThread.Post(() => OnSeedLimitReached(m));
         _settings.Changed += (_, _) => Dispatcher.UIThread.Post(ApplyUiSettings);
 
         for (var i = 0; i < HistoryLength; i++)
@@ -54,7 +57,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasSelection))]
     [NotifyCanExecuteChangedFor(nameof(StartSelectedCommand), nameof(PauseSelectedCommand), nameof(RemoveSelectedCommand),
-        nameof(RecheckSelectedCommand), nameof(OpenFolderCommand), nameof(CopyMagnetCommand))]
+        nameof(RecheckSelectedCommand), nameof(OpenFolderCommand), nameof(CopyMagnetCommand),
+        nameof(MoveToTopOfQueueCommand), nameof(MoveToBottomOfQueueCommand))]
     private TorrentItemViewModel? _selectedTorrent;
 
     [ObservableProperty] private TorrentFilter _filter = TorrentFilter.All;
@@ -75,6 +79,9 @@ public sealed partial class MainWindowViewModel : ViewModelBase
 
     public bool HasErrors => ErrorCount > 0;
 
+    /// <summary>The queue filter only appears once something is actually waiting in it.</summary>
+    public bool HasQueued => QueuedCount > 0;
+
     [ObservableProperty] private string _totalDownloadRateText = "0 B/s";
     [ObservableProperty] private string _totalUploadRateText = "0 B/s";
     [ObservableProperty] private string _dhtStatusText = "DHT: off";
@@ -88,12 +95,19 @@ public sealed partial class MainWindowViewModel : ViewModelBase
     [ObservableProperty] private double[] _uploadSamples = [];
     [ObservableProperty] private bool _isEmpty = true;
     [ObservableProperty] private bool _isFilteredEmpty;
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasQueued))]
+    private int _queuedCount;
+
+    /// <summary>What the tray icon says on hover. Watched by <see cref="App"/>.</summary>
+    [ObservableProperty] private string _trayTooltip = AppInfo.Name;
 
     public bool HasSelection => SelectedTorrent is not null;
 
     public bool IsFilterAll { get => Filter == TorrentFilter.All; set { if (value) Filter = TorrentFilter.All; } }
     public bool IsFilterDownloading { get => Filter == TorrentFilter.Downloading; set { if (value) Filter = TorrentFilter.Downloading; } }
     public bool IsFilterSeeding { get => Filter == TorrentFilter.Seeding; set { if (value) Filter = TorrentFilter.Seeding; } }
+    public bool IsFilterQueued { get => Filter == TorrentFilter.Queued; set { if (value) Filter = TorrentFilter.Queued; } }
     public bool IsFilterCompleted { get => Filter == TorrentFilter.Completed; set { if (value) Filter = TorrentFilter.Completed; } }
     public bool IsFilterPaused { get => Filter == TorrentFilter.Paused; set { if (value) Filter = TorrentFilter.Paused; } }
     public bool IsFilterActive { get => Filter == TorrentFilter.Active; set { if (value) Filter = TorrentFilter.Active; } }
@@ -122,6 +136,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         OnPropertyChanged(nameof(IsFilterAll));
         OnPropertyChanged(nameof(IsFilterDownloading));
         OnPropertyChanged(nameof(IsFilterSeeding));
+        OnPropertyChanged(nameof(IsFilterQueued));
         OnPropertyChanged(nameof(IsFilterCompleted));
         OnPropertyChanged(nameof(IsFilterPaused));
         OnPropertyChanged(nameof(IsFilterActive));
@@ -172,6 +187,38 @@ public sealed partial class MainWindowViewModel : ViewModelBase
             ShowToast("Network back", $"{name} is up again. Torrents are resuming.", isError: false);
         }
     }
+
+    /// <summary>
+    /// A torrent finished. Notifications are the desktop's business and toasts are ours; both go out,
+    /// because the window is often not the thing the user is looking at when this happens.
+    /// </summary>
+    private void OnTorrentCompleted(TorrentManager manager)
+    {
+        var name = NameOf(manager);
+        ShowToast("Finished", name, isError: false);
+
+        if (_settings.Current.NotifyOnComplete)
+            DesktopNotifier.Notify("Download finished", name);
+    }
+
+    private void OnTorrentFailed(TorrentManager manager)
+    {
+        var name = NameOf(manager);
+        var reason = manager.Error?.Exception?.Message ?? manager.Error?.Reason.ToString() ?? "Unknown error";
+        ShowToast("Torrent failed", $"{name} - {reason}", isError: true);
+
+        if (_settings.Current.NotifyOnError)
+            DesktopNotifier.Notify("Torrent failed", $"{name}\n{reason}");
+    }
+
+    private void OnSeedLimitReached(TorrentManager manager)
+    {
+        var name = NameOf(manager);
+        ShowToast("Seeding complete", $"{name} reached its seeding limit and has been stopped.", isError: false);
+    }
+
+    private static string NameOf(TorrentManager manager) =>
+        string.IsNullOrWhiteSpace(manager.Name) ? manager.InfoHashes.V1OrV2.ToHex() : manager.Name;
 
     private void OnTorrentAdded(TorrentManager manager)
     {
@@ -224,6 +271,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         PausedCount = Torrents.Count(t => t.MatchesFilter(TorrentFilter.Paused));
         ActiveCount = Torrents.Count(t => t.MatchesFilter(TorrentFilter.Active));
         ErrorCount = Torrents.Count(t => t.MatchesFilter(TorrentFilter.Error));
+        QueuedCount = Torrents.Count(t => t.IsQueued);
         IsEmpty = Torrents.Count == 0;
         IsFilteredEmpty = !IsEmpty && FilteredTorrents.Count == 0;
     }
@@ -249,6 +297,11 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         while (_uploadHistory.Count > HistoryLength) _uploadHistory.Dequeue();
         DownloadSamples = _downloadHistory.ToArray();
         UploadSamples = _uploadHistory.ToArray();
+
+        TrayTooltip = Torrents.Count == 0
+            ? AppInfo.Name
+            : $"{AppInfo.Name} - ↓ {TotalDownloadRateText}  ↑ {TotalUploadRateText}\n{DownloadingCount} downloading, {SeedingCount} seeding" +
+              (QueuedCount > 0 ? $", {QueuedCount} queued" : "");
 
         DhtStatusText = IsProxied ? "DHT: off (proxy)"
             : !_settings.Current.EnableDht ? "DHT: off"
@@ -425,6 +478,41 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         await Dialogs.SetClipboardTextAsync(t.MagnetUri);
         _lastClipboardMagnet = t.MagnetUri; // don't offer to re-add what we just copied
         ShowToast("Copied", "Magnet link copied to clipboard.", isError: false);
+    }
+
+    [RelayCommand(CanExecute = nameof(HasSelection))]
+    private Task MoveToTopOfQueue() =>
+        SelectedTorrent is { } t ? _service.MoveToTopOfQueueAsync(t.Manager) : Task.CompletedTask;
+
+    [RelayCommand(CanExecute = nameof(HasSelection))]
+    private Task MoveToBottomOfQueue() =>
+        SelectedTorrent is { } t ? _service.MoveToBottomOfQueueAsync(t.Manager) : Task.CompletedTask;
+
+    /// <summary>
+    /// Adds one torrent the watch folder found. The bool is what tells the watcher it may clear the file
+    /// away, so a torrent we already have counts as handled - otherwise the same file would be offered,
+    /// and refused, on every sweep for the rest of the session.
+    /// </summary>
+    public async Task<bool> AddFromWatchFolderAsync(string path)
+    {
+        if (!_service.IsInitialized) return false;
+
+        try
+        {
+            var manager = await _service.AddTorrentFileAsync(path);
+            ShowToast("Added from watch folder", manager.Name, isError: false);
+            return true;
+        }
+        catch (InvalidOperationException)
+        {
+            // Already in the list, or not a torrent we can make sense of. Either way, done with it.
+            return true;
+        }
+        catch (Exception ex)
+        {
+            ShowToast("Watch folder", $"{Path.GetFileName(path)}: {ex.Message}", isError: true);
+            return false;
+        }
     }
 
     [RelayCommand]

@@ -16,7 +16,7 @@ public sealed record AddTorrentRequest(string Source, bool IsMagnet, string Save
 public interface IDialogService
 {
     Task<IReadOnlyList<string>> PickTorrentFilesAsync();
-    Task<string?> PickFolderAsync(string? initialDirectory);
+    Task<string?> PickFolderAsync(string? initialDirectory, string title);
     Task<AddTorrentRequest?> ShowAddTorrentAsync(AddTorrentViewModel viewModel);
     Task<bool> ShowSettingsAsync(SettingsViewModel viewModel);
     Task<RemoveChoice> ConfirmRemoveAsync(IReadOnlyList<string> names);

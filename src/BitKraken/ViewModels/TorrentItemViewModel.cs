@@ -87,7 +87,9 @@ public sealed partial class TorrentItemViewModel : ViewModelBase
     [ObservableProperty] private int _leechers;
     [ObservableProperty] private int _connectedPeers;
     [ObservableProperty] private string _peersText = "0 / 0";
-    [ObservableProperty] private bool _isActive;
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsRunningOrWaiting))]
+    private bool _isActive;
     [ObservableProperty] private bool _isDownloading;
     [ObservableProperty] private bool _isSeeding;
     [ObservableProperty] private bool _isPaused;
@@ -104,6 +106,17 @@ public sealed partial class TorrentItemViewModel : ViewModelBase
     [ObservableProperty] private string _comment = "";
     [ObservableProperty] private bool _isPrivate;
     [ObservableProperty] private int _fileCount;
+
+    /// <summary>True while the queue is holding this torrent back rather than the user.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsRunningOrWaiting))]
+    private bool _isQueued;
+
+    /// <summary>True once this torrent has seeded everything its limits asked for.</summary>
+    [ObservableProperty] private bool _isSeedLimitReached;
+
+    [ObservableProperty] private string _seedTimeText = "—";
+    [ObservableProperty] private string _seedLimitText = "";
 
     public ObservableCollection<FileItemViewModel> Files { get; } = [];
     public ObservableCollection<PeerItemViewModel> Peers { get; } = [];
@@ -128,11 +141,13 @@ public sealed partial class TorrentItemViewModel : ViewModelBase
         Progress = m.HasMetadata ? m.Progress : 0;
         ProgressText = m.HasMetadata ? Format.Percent(Progress) : "…";
 
-        var downloaded = m.Monitor.DataBytesReceived;
-        var uploaded = m.Monitor.DataBytesSent;
-        DownloadedText = Format.Bytes(downloaded);
-        UploadedText = Format.Bytes(uploaded);
-        RatioText = Format.Ratio(uploaded, Math.Max(downloaded, (long)(Size * Progress / 100)));
+        // The engine's counters start again from zero every session; these are the running totals
+        // BitKraken keeps, which is also what the seeding limit is measured against.
+        var totals = _service.TotalsFor(m);
+        DownloadedText = Format.Bytes(totals.Downloaded);
+        UploadedText = Format.Bytes(totals.Uploaded);
+        RatioText = Format.Ratio(ShareRatio.Of(totals.Uploaded, totals.Downloaded, (long)(Size * Progress / 100)));
+        SeedTimeText = totals.Seeded > TimeSpan.Zero ? Format.Duration(totals.Seeded) : "—";
 
         DownloadRate = m.Monitor.DownloadRate;
         UploadRate = m.Monitor.UploadRate;
@@ -156,11 +171,24 @@ public sealed partial class TorrentItemViewModel : ViewModelBase
         EtaText = IsDownloading && DownloadRate > 0 ? Format.Eta(TimeSpan.FromSeconds(remaining / (double)DownloadRate))
             : IsComplete ? "Done" : "∞";
 
+        var overrides = _service.OverridesFor(m);
+        var queuePosition = _service.QueuePositionOf(m);
+        IsQueued = queuePosition is not null;
+        IsSeedLimitReached = overrides.SeedLimitReached;
+        SeedLimitText = _service.SeedLimitTextFor(m);
+
+        // The kill switch is holding everything it did not find paused.
+        var held = _service.IsNetworkSuspended && !overrides.PausedByUser && !overrides.SeedLimitReached;
+
         (StatusText, StatusBrush) = m.State switch
         {
             TorrentState.Downloading => ("Downloading", DownloadingBrush),
             TorrentState.Seeding => ("Seeding", SeedingBrush),
             TorrentState.Paused => ("Paused", PausedBrush),
+            TorrentState.Stopped when IsSeedLimitReached => ("Seeding complete", CompleteBrush),
+            TorrentState.Stopped when queuePosition is { } place => ($"Queued #{place}", PendingBrush),
+            TorrentState.Stopped when held => ("Held - network down", PendingBrush),
+            TorrentState.Stopped when overrides.PausedByUser => ("Paused", PausedBrush),
             TorrentState.Stopped => (IsComplete ? "Finished" : "Stopped", IsComplete ? CompleteBrush : PausedBrush),
             TorrentState.Hashing => ("Checking", PendingBrush),
             TorrentState.HashingPaused => ("Check paused", PausedBrush),
@@ -309,14 +337,86 @@ public sealed partial class TorrentItemViewModel : ViewModelBase
         }
     }
 
+    // ----- Per-torrent options (the Options tab) -------------------------------------------------------------------
+
+    /// <summary>
+    /// Whether this torrent picks pieces in order. Reads the setting in force - the torrent's own choice
+    /// if it has one, the global default otherwise - and writing pins it to this torrent.
+    /// </summary>
+    public bool SequentialDownload
+    {
+        get => _service.IsSequential(Manager);
+        set
+        {
+            if (value == SequentialDownload) return;
+            _ = _service.SetSequentialAsync(Manager, value);
+            OnPropertyChanged();
+        }
+    }
+
+    /// <summary>Download cap for this torrent alone, in KiB/s. Null follows the global limit.</summary>
+    public decimal? DownloadLimitKiB
+    {
+        get => _service.OverridesFor(Manager).MaxDownloadRateKiB;
+        set => SetRateLimits(value, UploadLimitKiB);
+    }
+
+    /// <summary>Upload cap for this torrent alone, in KiB/s. Null follows the global limit.</summary>
+    public decimal? UploadLimitKiB
+    {
+        get => _service.OverridesFor(Manager).MaxUploadRateKiB;
+        set => SetRateLimits(DownloadLimitKiB, value);
+    }
+
+    /// <summary>Ratio this torrent stops seeding at. Null follows the global limit.</summary>
+    public decimal? SeedRatioOverride
+    {
+        get => (decimal?)_service.OverridesFor(Manager).SeedRatioLimit;
+        set => SetSeedLimit(value, SeedMinutesOverride);
+    }
+
+    /// <summary>Minutes this torrent seeds for. Null follows the global limit.</summary>
+    public decimal? SeedMinutesOverride
+    {
+        get => _service.OverridesFor(Manager).SeedTimeLimitMinutes;
+        set => SetSeedLimit(SeedRatioOverride, value);
+    }
+
+    private void SetRateLimits(decimal? download, decimal? upload)
+    {
+        _ = _service.SetRateLimitsAsync(Manager, (int?)download, (int?)upload);
+        OnPropertyChanged(nameof(DownloadLimitKiB));
+        OnPropertyChanged(nameof(UploadLimitKiB));
+    }
+
+    private void SetSeedLimit(decimal? ratio, decimal? minutes)
+    {
+        _ = _service.SetSeedLimitAsync(Manager, (double?)ratio, (int?)minutes);
+        OnPropertyChanged(nameof(SeedRatioOverride));
+        OnPropertyChanged(nameof(SeedMinutesOverride));
+    }
+
+    [RelayCommand]
+    private Task MoveToTopOfQueue() => _service.MoveToTopOfQueueAsync(Manager);
+
+    [RelayCommand]
+    private Task MoveToBottomOfQueue() => _service.MoveToBottomOfQueueAsync(Manager);
+
     [RelayCommand]
     private Task Start() => _service.StartAsync(Manager);
 
     [RelayCommand]
     private Task Pause() => _service.PauseAsync(Manager);
 
+    /// <summary>
+    /// True when this torrent is running or on its way to running. It drives the one button on the
+    /// card, and a queued torrent belongs on this side of it: it has already been started, so the
+    /// useful thing to offer is pausing it, not starting it a second time.
+    /// </summary>
+    public bool IsRunningOrWaiting => IsActive || IsQueued;
+
     [RelayCommand]
-    private Task TogglePause() => IsActive ? Pause() : Start();
+    private Task TogglePause() => IsRunningOrWaiting ? Pause() : Start();
 
     [RelayCommand]
     private Task Recheck() => _service.RecheckAsync(Manager);
@@ -337,7 +437,11 @@ public sealed partial class TorrentItemViewModel : ViewModelBase
         TorrentFilter.Downloading => State is TorrentState.Downloading or TorrentState.Metadata or TorrentState.Hashing or TorrentState.Starting or TorrentState.FetchingHashes,
         TorrentFilter.Seeding => State == TorrentState.Seeding,
         TorrentFilter.Completed => IsComplete,
-        TorrentFilter.Paused => State is TorrentState.Paused or TorrentState.Stopped or TorrentState.HashingPaused,
+        TorrentFilter.Queued => IsQueued,
+
+        // Queued torrents are stopped, but nobody paused them - they are waiting their turn, and
+        // counting them under Paused would have the sidebar blaming the user for the queue.
+        TorrentFilter.Paused => !IsQueued && State is TorrentState.Paused or TorrentState.Stopped or TorrentState.HashingPaused,
         TorrentFilter.Active => DownloadRate > 0 || UploadRate > 0,
         TorrentFilter.Error => State == TorrentState.Error,
         _ => true,
@@ -349,6 +453,7 @@ public enum TorrentFilter
     All,
     Downloading,
     Seeding,
+    Queued,
     Completed,
     Paused,
     Active,

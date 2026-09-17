@@ -40,8 +40,8 @@
                         <Button Classes="ghost icon" Width="28" Height="28" Padding="5" Command="{Binding TogglePauseCommand}"
                                 ToolTip.Tip="Pause / Resume">
                             <Panel>
-                                <PathIcon Data="{StaticResource Icon.Pause}" Width="14" Height="14" IsVisible="{Binding IsActive}" />
-                                <PathIcon Data="{StaticResource Icon.Play}" Width="14" Height="14" IsVisible="{Binding !IsActive}" />
+                                <PathIcon Data="{StaticResource Icon.Pause}" Width="14" Height="14" IsVisible="{Binding IsRunningOrWaiting}" />
+                                <PathIcon Data="{StaticResource Icon.Play}" Width="14" Height="14" IsVisible="{Binding !IsRunningOrWaiting}" />
                             </Panel>
                         </Button>
                     </StackPanel>
@@ -164,6 +164,13 @@
                                     <TextBlock Grid.Column="2" Text="{Binding SeedingCount}" Classes="muted" FontSize="12" VerticalAlignment="Center" />
                                 </Grid>
                             </RadioButton>
+                            <RadioButton Classes="nav" GroupName="filter" IsChecked="{Binding IsFilterQueued}" IsVisible="{Binding HasQueued}">
+                                <Grid ColumnDefinitions="Auto,*,Auto">
+                                    <PathIcon Grid.Column="0" Data="{StaticResource Icon.Queue}" Width="15" Height="15" Margin="0,0,10,0" Foreground="{StaticResource Kraken.AmberBrush}" />
+                                    <TextBlock Grid.Column="1" Text="Queued" VerticalAlignment="Center" />
+                                    <TextBlock Grid.Column="2" Text="{Binding QueuedCount}" Classes="muted" FontSize="12" VerticalAlignment="Center" />
+                                </Grid>
+                            </RadioButton>
                             <RadioButton Classes="nav" GroupName="filter" IsChecked="{Binding IsFilterCompleted}">
                                 <Grid ColumnDefinitions="Auto,*,Auto">
                                     <PathIcon Grid.Column="0" Data="{StaticResource Icon.Check}" Width="15" Height="15" Margin="0,0,10,0" Foreground="{StaticResource Kraken.GreenBrush}" />
@@ -268,6 +275,10 @@
                                     <MenuItem Header="Resume" Command="{Binding StartSelectedCommand}" />
                                     <MenuItem Header="Pause" Command="{Binding PauseSelectedCommand}" />
                                     <Separator />
+                                    <Separator />
+                                    <MenuItem Header="Move to top of queue" Command="{Binding MoveToTopOfQueueCommand}" />
+                                    <MenuItem Header="Move to bottom of queue" Command="{Binding MoveToBottomOfQueueCommand}" />
+                                    <Separator />
                                     <MenuItem Header="Force re-check" Command="{Binding RecheckSelectedCommand}" />
                                     <MenuItem Header="Open folder" Command="{Binding OpenFolderCommand}" />
                                     <MenuItem Header="Copy magnet link" Command="{Binding CopyMagnetCommand}" />
@@ -317,7 +328,7 @@
                                         </Grid>
 
                                         <ScrollViewer Grid.Row="0" Grid.RowSpan="2" Grid.Column="2">
-                                            <Grid ColumnDefinitions="Auto,12,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto">
+                                            <Grid ColumnDefinitions="Auto,12,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto">
                                                 <Grid.Styles>
                                                     <Style Selector="TextBlock.k">
                                                         <Setter Property="Foreground" Value="{StaticResource Kraken.TextMutedBrush}" />
@@ -330,26 +341,30 @@
                                                         <Setter Property="TextTrimming" Value="CharacterEllipsis" />
                                                     </Style>
                                                 </Grid.Styles>
-                                                <TextBlock Grid.Row="0" Grid.Column="0" Classes="k" Text="Received (session)" />
+                                                <TextBlock Grid.Row="0" Grid.Column="0" Classes="k" Text="Downloaded" />
                                                 <TextBlock Grid.Row="0" Grid.Column="2" Classes="v" Text="{Binding DownloadedText}" />
-                                                <TextBlock Grid.Row="1" Grid.Column="0" Classes="k" Text="Sent (session)" />
+                                                <TextBlock Grid.Row="1" Grid.Column="0" Classes="k" Text="Uploaded" />
                                                 <TextBlock Grid.Row="1" Grid.Column="2" Classes="v" Text="{Binding UploadedText}" />
                                                 <TextBlock Grid.Row="2" Grid.Column="0" Classes="k" Text="Share ratio" />
                                                 <TextBlock Grid.Row="2" Grid.Column="2" Classes="v" Text="{Binding RatioText}" />
-                                                <TextBlock Grid.Row="3" Grid.Column="0" Classes="k" Text="Connected" />
-                                                <TextBlock Grid.Row="3" Grid.Column="2" Classes="v" Text="{Binding ConnectedPeers}" />
-                                                <TextBlock Grid.Row="4" Grid.Column="0" Classes="k" Text="Save path" />
-                                                <TextBlock Grid.Row="4" Grid.Column="2" Classes="v" Text="{Binding SavePath}" ToolTip.Tip="{Binding SavePath}" />
-                                                <TextBlock Grid.Row="5" Grid.Column="0" Classes="k" Text="Info hash" />
-                                                <TextBlock Grid.Row="5" Grid.Column="2" Classes="v mono" Text="{Binding InfoHash}" />
-                                                <TextBlock Grid.Row="6" Grid.Column="0" Classes="k" Text="Started" />
-                                                <TextBlock Grid.Row="6" Grid.Column="2" Classes="v" Text="{Binding AddedAtText}" />
-                                                <TextBlock Grid.Row="7" Grid.Column="0" Classes="k" Text="Created by" IsVisible="{Binding CreatedBy, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
-                                                <TextBlock Grid.Row="7" Grid.Column="2" Classes="v" Text="{Binding CreatedBy}" IsVisible="{Binding CreatedBy, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
-                                                <TextBlock Grid.Row="8" Grid.Column="0" Classes="k" Text="Comment" IsVisible="{Binding Comment, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
-                                                <TextBlock Grid.Row="8" Grid.Column="2" Classes="v" Text="{Binding Comment}" TextWrapping="Wrap" IsVisible="{Binding Comment, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
-                                                <TextBlock Grid.Row="9" Grid.Column="0" Classes="k" Text="Private" IsVisible="{Binding IsPrivate}" />
-                                                <TextBlock Grid.Row="9" Grid.Column="2" Classes="v" Text="Yes — DHT/PEX disabled" IsVisible="{Binding IsPrivate}" />
+                                                <TextBlock Grid.Row="3" Grid.Column="0" Classes="k" Text="Seeded for" />
+                                                <TextBlock Grid.Row="3" Grid.Column="2" Classes="v" Text="{Binding SeedTimeText}" />
+                                                <TextBlock Grid.Row="4" Grid.Column="0" Classes="k" Text="Seeding limit" IsVisible="{Binding SeedLimitText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                                                <TextBlock Grid.Row="4" Grid.Column="2" Classes="v" Text="{Binding SeedLimitText}" IsVisible="{Binding SeedLimitText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                                                <TextBlock Grid.Row="5" Grid.Column="0" Classes="k" Text="Connected" />
+                                                <TextBlock Grid.Row="5" Grid.Column="2" Classes="v" Text="{Binding ConnectedPeers}" />
+                                                <TextBlock Grid.Row="6" Grid.Column="0" Classes="k" Text="Save path" />
+                                                <TextBlock Grid.Row="6" Grid.Column="2" Classes="v" Text="{Binding SavePath}" ToolTip.Tip="{Binding SavePath}" />
+                                                <TextBlock Grid.Row="7" Grid.Column="0" Classes="k" Text="Info hash" />
+                                                <TextBlock Grid.Row="7" Grid.Column="2" Classes="v mono" Text="{Binding InfoHash}" />
+                                                <TextBlock Grid.Row="8" Grid.Column="0" Classes="k" Text="Started" />
+                                                <TextBlock Grid.Row="8" Grid.Column="2" Classes="v" Text="{Binding AddedAtText}" />
+                                                <TextBlock Grid.Row="9" Grid.Column="0" Classes="k" Text="Created by" IsVisible="{Binding CreatedBy, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                                                <TextBlock Grid.Row="9" Grid.Column="2" Classes="v" Text="{Binding CreatedBy}" IsVisible="{Binding CreatedBy, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                                                <TextBlock Grid.Row="10" Grid.Column="0" Classes="k" Text="Comment" IsVisible="{Binding Comment, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                                                <TextBlock Grid.Row="10" Grid.Column="2" Classes="v" Text="{Binding Comment}" TextWrapping="Wrap" IsVisible="{Binding Comment, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                                                <TextBlock Grid.Row="11" Grid.Column="0" Classes="k" Text="Private" IsVisible="{Binding IsPrivate}" />
+                                                <TextBlock Grid.Row="11" Grid.Column="2" Classes="v" Text="Yes — DHT/PEX disabled" IsVisible="{Binding IsPrivate}" />
                                             </Grid>
                                         </ScrollViewer>
                                     </Grid>
@@ -454,6 +469,84 @@
                                             </ListBox.ItemTemplate>
                                         </ListBox>
                                     </Grid>
+                                </TabItem>
+                                <!-- Options -->
+                                <TabItem Header="Options">
+                                    <ScrollViewer>
+                                        <StackPanel Margin="10,2,10,0" Spacing="2">
+                                            <StackPanel.Styles>
+                                                <Style Selector="Border.orow">
+                                                    <Setter Property="Padding" Value="0,7" />
+                                                    <Setter Property="BorderBrush" Value="{StaticResource Kraken.BorderBrush}" />
+                                                    <Setter Property="BorderThickness" Value="0,0,0,1" />
+                                                </Style>
+                                                <Style Selector="TextBlock.ohint">
+                                                    <Setter Property="FontSize" Value="11" />
+                                                    <Setter Property="Foreground" Value="{StaticResource Kraken.TextMutedBrush}" />
+                                                    <Setter Property="TextWrapping" Value="Wrap" />
+                                                </Style>
+                                                <Style Selector="NumericUpDown">
+                                                    <Setter Property="Width" Value="104" />
+                                                    <Setter Property="MinHeight" Value="30" />
+                                                    <Setter Property="FontSize" Value="12" />
+                                                    <!-- These are "leave empty to follow the global setting" fields, so
+                                                         they are typed into rather than spun, and the arrows would only
+                                                         crowd out the placeholder that says what each one is. -->
+                                                    <Setter Property="ShowButtonSpinner" Value="False" />
+                                                </Style>
+                                            </StackPanel.Styles>
+
+                                            <Border Classes="orow">
+                                                <Grid ColumnDefinitions="*,Auto">
+                                                    <StackPanel>
+                                                        <TextBlock Text="Download pieces in order" FontSize="12" />
+                                                        <TextBlock Text="Fills the torrent from the start so a partial file plays. A file set to Highest priority in the Files tab goes first." Classes="ohint" />
+                                                    </StackPanel>
+                                                    <ToggleSwitch Grid.Column="1" IsChecked="{Binding SequentialDownload}" OnContent="" OffContent="" VerticalAlignment="Center" />
+                                                </Grid>
+                                            </Border>
+                                            <Border Classes="orow">
+                                                <Grid ColumnDefinitions="*,Auto">
+                                                    <StackPanel>
+                                                        <TextBlock Text="Speed limits for this torrent (KiB/s)" FontSize="12" />
+                                                        <TextBlock Text="Leave empty to follow the global limits. 0 means unlimited for this torrent." Classes="ohint" />
+                                                    </StackPanel>
+                                                    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                                                        <NumericUpDown Value="{Binding DownloadLimitKiB}" Minimum="0" Maximum="1000000" Increment="256"
+                                                                       FormatString="0" PlaceholderText="down" />
+                                                        <NumericUpDown Value="{Binding UploadLimitKiB}" Minimum="0" Maximum="1000000" Increment="256"
+                                                                       FormatString="0" PlaceholderText="up" />
+                                                    </StackPanel>
+                                                </Grid>
+                                            </Border>
+                                            <Border Classes="orow">
+                                                <Grid ColumnDefinitions="*,Auto">
+                                                    <StackPanel>
+                                                        <TextBlock Text="Stop seeding at" FontSize="12" />
+                                                        <TextBlock Text="Ratio and minutes, whichever comes first. Empty follows the global limits; 0 means never." Classes="ohint" />
+                                                    </StackPanel>
+                                                    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                                                        <NumericUpDown Value="{Binding SeedRatioOverride}" Minimum="0" Maximum="10000" Increment="0.1"
+                                                                       FormatString="0.##" PlaceholderText="ratio" />
+                                                        <NumericUpDown Value="{Binding SeedMinutesOverride}" Minimum="0" Maximum="525600" Increment="30"
+                                                                       FormatString="0" PlaceholderText="minutes" />
+                                                    </StackPanel>
+                                                </Grid>
+                                            </Border>
+                                            <Border Classes="orow" BorderThickness="0">
+                                                <Grid ColumnDefinitions="*,Auto">
+                                                    <StackPanel>
+                                                        <TextBlock Text="Queue" FontSize="12" />
+                                                        <TextBlock Text="{Binding StatusText, StringFormat='Currently: {0}'}" Classes="ohint" />
+                                                    </StackPanel>
+                                                    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                                                        <Button Classes="ghost" Content="Move to top" FontSize="12" Command="{Binding MoveToTopOfQueueCommand}" />
+                                                        <Button Classes="ghost" Content="Move to bottom" FontSize="12" Command="{Binding MoveToBottomOfQueueCommand}" />
+                                                    </StackPanel>
+                                                </Grid>
+                                            </Border>
+                                        </StackPanel>
+                                    </ScrollViewer>
                                 </TabItem>
                             </TabControl>
                             </Panel>

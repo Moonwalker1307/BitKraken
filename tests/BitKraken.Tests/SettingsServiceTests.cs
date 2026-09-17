@@ -36,6 +36,18 @@ public class SettingsServiceTests
         saved.ProxyPort = 9050;
         saved.ProxyUsername = "user";
         saved.ProxyPassword = "secret";
+        saved.MaxActiveDownloads = 7;
+        saved.MaxActiveSeeds = 9;
+        saved.SeedRatioLimit = 2.5;
+        saved.SeedTimeLimitMinutes = 180;
+        saved.SequentialDownload = true;
+        saved.ShowTrayIcon = false;
+        saved.MinimizeToTray = true;
+        saved.CloseToTray = true;
+        saved.NotifyOnComplete = false;
+        saved.NotifyOnError = false;
+        saved.WatchFolder = Path.Combine(dir, "watch");
+        saved.WatchFolderAction = WatchFolderAction.Delete;
 
         await new SettingsService(dir).SaveAsync(saved);
 
@@ -64,6 +76,18 @@ public class SettingsServiceTests
         Assert.Equal(9050, loaded.ProxyPort);
         Assert.Equal("user", loaded.ProxyUsername);
         Assert.Equal("secret", loaded.ProxyPassword);
+        Assert.Equal(7, loaded.MaxActiveDownloads);
+        Assert.Equal(9, loaded.MaxActiveSeeds);
+        Assert.Equal(2.5, loaded.SeedRatioLimit);
+        Assert.Equal(180, loaded.SeedTimeLimitMinutes);
+        Assert.True(loaded.SequentialDownload);
+        Assert.False(loaded.ShowTrayIcon);
+        Assert.True(loaded.MinimizeToTray);
+        Assert.True(loaded.CloseToTray);
+        Assert.False(loaded.NotifyOnComplete);
+        Assert.False(loaded.NotifyOnError);
+        Assert.Equal(Path.Combine(dir, "watch"), loaded.WatchFolder);
+        Assert.Equal(WatchFolderAction.Delete, loaded.WatchFolderAction);
     }
 
     [Fact]
@@ -159,7 +183,21 @@ public class SettingsServiceTests
         Assert.True(service.Current.AddFallbackTrackers);
         Assert.True(service.Current.AnimatedBackground);
         Assert.True(service.Current.HandleMagnetLinks);
+        Assert.True(service.Current.ShowTrayIcon);
+        Assert.True(service.Current.NotifyOnComplete);
+        Assert.True(service.Current.NotifyOnError);
+        Assert.Equal(3, service.Current.MaxActiveDownloads);
         Assert.Equal(downloads, service.Current.DownloadDirectory);
+
+        // Hiding the window is the one thing that must never switch itself on for an existing user:
+        // a desktop with no tray would leave them with no window and no way back to it.
+        Assert.False(service.Current.MinimizeToTray);
+        Assert.False(service.Current.CloseToTray);
+
+        // Nor may a seeding limit appear out of nowhere and stop torrents that were running fine.
+        Assert.Equal(0, service.Current.MaxActiveSeeds);
+        Assert.Equal(0, service.Current.SeedRatioLimit);
+        Assert.Equal(0, service.Current.SeedTimeLimitMinutes);
     }
 
     [Fact]
