@@ -47,7 +47,7 @@ public class WatchFolderServiceTests
         var settings = await SettingsForAsync(root, watched, WatchFolderAction.MarkAsAdded);
         var offered = new List<string>();
 
-        await using var service = new WatchFolderService(settings, path =>
+        using var service = new WatchFolderService(settings, path =>
         {
             lock (offered) offered.Add(path);
             return Task.FromResult(true);
@@ -70,7 +70,7 @@ public class WatchFolderServiceTests
         var settings = await SettingsForAsync(root, watched, WatchFolderAction.MarkAsAdded);
         var offers = 0;
 
-        await using var service = new WatchFolderService(settings, _ =>
+        using var service = new WatchFolderService(settings, _ =>
         {
             Interlocked.Increment(ref offers);
             return Task.FromResult(true);
@@ -93,7 +93,7 @@ public class WatchFolderServiceTests
 
         var settings = await SettingsForAsync(root, watched, WatchFolderAction.Delete);
 
-        await using var service = new WatchFolderService(settings, _ => Task.FromResult(true));
+        using var service = new WatchFolderService(settings, _ => Task.FromResult(true));
         service.Apply();
 
         Assert.True(await WaitForAsync(() => !File.Exists(torrent)));
@@ -112,7 +112,7 @@ public class WatchFolderServiceTests
         var settings = await SettingsForAsync(root, watched, WatchFolderAction.Delete);
         var offers = 0;
 
-        await using var service = new WatchFolderService(settings, _ =>
+        using var service = new WatchFolderService(settings, _ =>
         {
             Interlocked.Increment(ref offers);
             return Task.FromResult(false);
@@ -141,7 +141,7 @@ public class WatchFolderServiceTests
         await writer.WriteAsync("d4:info"u8.ToArray());
         await writer.FlushAsync();
 
-        await using var service = new WatchFolderService(settings, _ =>
+        using var service = new WatchFolderService(settings, _ =>
         {
             Interlocked.Increment(ref offers);
             return Task.FromResult(true);
@@ -168,7 +168,7 @@ public class WatchFolderServiceTests
         var settings = await SettingsForAsync(root, watched, WatchFolderAction.MarkAsAdded);
         var offers = 0;
 
-        await using var service = new WatchFolderService(settings, _ =>
+        using var service = new WatchFolderService(settings, _ =>
         {
             Interlocked.Increment(ref offers);
             return Task.FromResult(true);
@@ -191,7 +191,7 @@ public class WatchFolderServiceTests
         var settings = await SettingsForAsync(root, watched, WatchFolderAction.Delete);
         var offers = 0;
 
-        await using var service = new WatchFolderService(settings, _ =>
+        using var service = new WatchFolderService(settings, _ =>
         {
             Interlocked.Increment(ref offers);
             return Task.FromResult(true);
@@ -212,7 +212,7 @@ public class WatchFolderServiceTests
         var settings = await SettingsForAsync(root, "", WatchFolderAction.MarkAsAdded);
         var offers = 0;
 
-        await using var service = new WatchFolderService(settings, _ =>
+        using var service = new WatchFolderService(settings, _ =>
         {
             Interlocked.Increment(ref offers);
             return Task.FromResult(true);
@@ -230,7 +230,7 @@ public class WatchFolderServiceTests
         var watched = Path.Combine(root, "not-yet");
         var settings = await SettingsForAsync(root, watched, WatchFolderAction.MarkAsAdded);
 
-        await using var service = new WatchFolderService(settings, _ => Task.FromResult(true));
+        using var service = new WatchFolderService(settings, _ => Task.FromResult(true));
         service.Apply();
 
         Assert.True(Directory.Exists(watched));
@@ -248,7 +248,7 @@ public class WatchFolderServiceTests
         var settings = await SettingsForAsync(root, first, WatchFolderAction.MarkAsAdded);
         var offered = new List<string>();
 
-        await using var service = new WatchFolderService(settings, path =>
+        using var service = new WatchFolderService(settings, path =>
         {
             lock (offered) offered.Add(path);
             return Task.FromResult(true);

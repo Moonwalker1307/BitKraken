@@ -9,7 +9,7 @@ namespace BitKraken.Services;
 /// misses events on network shares and on some Linux setups. So a file is only offered once it can be
 /// opened exclusively, and a slow sweep runs alongside the watcher to catch whatever it missed.
 /// </summary>
-public sealed class WatchFolderService : IAsyncDisposable
+public sealed class WatchFolderService : IDisposable
 {
     /// <summary>Suffix given to a torrent that has been added, which also takes it out of the filter.</summary>
     public const string AddedSuffix = ".added";
@@ -184,18 +184,34 @@ public sealed class WatchFolderService : IAsyncDisposable
         _sweep?.Dispose();
         _sweep = null;
 
-        if (_watcher is not null)
+        var watcher = _watcher;
+        _watcher = null;
+        if (watcher is null) return;
+
+        try
         {
-            _watcher.EnableRaisingEvents = false;
-            _watcher.Dispose();
-            _watcher = null;
+            // Turning events off re-reads the directory, so a folder that has been unmounted or
+            // deleted underneath us throws here. On the way out that must not become a crash.
+            watcher.EnableRaisingEvents = false;
+        }
+        catch (Exception)
+        {
+            // Disposing below drops the handle regardless.
+        }
+
+        try
+        {
+            watcher.Dispose();
+        }
+        catch (Exception)
+        {
+            // Nothing further to do about it.
         }
     }
 
-    public ValueTask DisposeAsync()
+    public void Dispose()
     {
         _disposed = true;
         Stop();
-        return ValueTask.CompletedTask;
     }
 }

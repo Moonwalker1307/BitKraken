@@ -33,6 +33,9 @@ public sealed class TorrentService : IAsyncDisposable
     /// <summary>Per-torrent preferences are written at most this often while only the totals are moving.</summary>
     private static readonly TimeSpan PreferenceSaveInterval = TimeSpan.FromSeconds(30);
 
+    /// <summary>How long shutdown waits for a reconcile in flight before giving up on a last sample.</summary>
+    private static readonly TimeSpan ReconcileSettleTimeout = TimeSpan.FromSeconds(2);
+
     /// <summary>
     /// How long stopping a torrent waits for the tracker to acknowledge the final "stopped" announce.
     /// None, because there is nothing to wait for: MonoTorrent has already sent the announce by the time
@@ -650,23 +653,29 @@ public sealed class TorrentService : IAsyncDisposable
         if (_engine is null || _shuttingDown) return;
         _shuttingDown = true;
 
-        if (_reconcileTimer is not null) await _reconcileTimer.DisposeAsync();
-        _reconcileTimer = null;
-
-        // Wait for any reconcile still in flight: it samples the same counters we are about to, and
-        // two threads walking those dictionaries is how a clean exit turns into a crash on the way out.
-        await _reconcileLock.WaitAsync();
         try
         {
-            SampleTotals(_engine.Torrents.ToList());
+            if (_reconcileTimer is not null) await _reconcileTimer.DisposeAsync();
+            _reconcileTimer = null;
+
+            // Wait for any reconcile still in flight: it samples the same counters we are about to, and
+            // two threads walking those dictionaries is how a clean exit turns into a crash on the way
+            // out. Bounded, because a wedged reconcile must not be able to hold the app open either.
+            if (await _reconcileLock.WaitAsync(ReconcileSettleTimeout))
+            {
+                try
+                {
+                    SampleTotals(_engine.Torrents.ToList());
+                }
+                finally
+                {
+                    _reconcileLock.Release();
+                }
+            }
         }
-        catch
+        catch (Exception)
         {
             // A last sample is a nicety; never let it stand between the user and a clean exit.
-        }
-        finally
-        {
-            _reconcileLock.Release();
         }
 
         _preferences.Save(force: true);
@@ -687,7 +696,14 @@ public sealed class TorrentService : IAsyncDisposable
         }
         finally
         {
-            _engine.Dispose();
+            try
+            {
+                _engine.Dispose();
+            }
+            catch (Exception)
+            {
+                // The process is going; a disposal that objects cannot be allowed to abort it.
+            }
         }
     }
 

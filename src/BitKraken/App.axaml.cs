@@ -68,11 +68,7 @@ public partial class App : Application
             SubscribeToUrlActivation();
             //  3. from a second launch that handed its arguments over and quit (see SingleInstance).
             SingleInstance.Listen(sources => QueueSources(sources));
-            desktop.Exit += (_, _) =>
-            {
-                SingleInstance.Stop();
-                ShutdownServicesAsync().GetAwaiter().GetResult();
-            };
+            desktop.Exit += (_, _) => ShutdownServices();
 
             // Windows and Linux only learn that BitKraken handles magnet: links if we tell them.
             _ = ShellIntegration.ApplyAsync(Settings.Current.HandleMagnetLinks);
@@ -202,14 +198,37 @@ public partial class App : Application
         _mainWindow.Close();
     }
 
-    /// <summary>Releases what the app owns outside the engine. Called as the lifetime exits.</summary>
-    private async Task ShutdownServicesAsync()
+    /// <summary>
+    /// Releases what the app owns outside the engine, as the lifetime exits.
+    /// </summary>
+    /// <remarks>
+    /// Nothing in here may throw. Avalonia raises Exit with no catch around it, on the main thread's
+    /// way out of Main, so an exception escaping this is not a logged error and not a dialog - it is
+    /// an abort, with no window left to report it in and a crash log instead of a clean quit.
+    /// </remarks>
+    private void ShutdownServices()
     {
-        _tray?.Dispose();
-        _tray = null;
+        try
+        {
+            SingleInstance.Stop();
+        }
+        catch (Exception)
+        {
+            // Nothing left to clean up for.
+        }
 
-        if (_watchFolder is not null) await _watchFolder.DisposeAsync();
-        _watchFolder = null;
+        try
+        {
+            _tray?.Dispose();
+            _tray = null;
+
+            _watchFolder?.Dispose();
+            _watchFolder = null;
+        }
+        catch (Exception)
+        {
+            // As above: on the way out, a failed teardown is not worth a crash report.
+        }
     }
 
     /// <summary>Turns what the shell handed us into a magnet link or a torrent path, or null if it is neither.</summary>

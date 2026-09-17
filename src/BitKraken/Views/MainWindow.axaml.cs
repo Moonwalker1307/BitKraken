@@ -63,6 +63,12 @@ public partial class MainWindow : Window, IDialogService
         {
             await App.Torrents.ShutdownAsync();
         }
+        catch (Exception)
+        {
+            // This handler is async void, so an exception escaping it is rethrown on the dispatcher
+            // with nobody to catch it, and the app aborts instead of closing. Whatever went wrong in
+            // the shutdown, the window still has to close.
+        }
         finally
         {
             _shutdownComplete = true;
