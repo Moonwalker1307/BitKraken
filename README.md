@@ -124,16 +124,35 @@ Notifications use whatever the desktop already provides, rather than BitKraken t
 
 | Platform | How |
 | --- | --- |
-| macOS | `osascript`, which hands it to Notification Center |
+| macOS | `osascript`, which hands it to Notification Center — posted as the helper bundle below, so it carries the logo |
 | Linux | `notify-send` — the freedesktop.org standard, present on most desktops |
 | Windows | a toast raised through PowerShell's WinRT bridge, so it is attributed to "Windows PowerShell" rather than to BitKraken, which would need its own registered AppUserModelID |
 
-The Linux and Windows notifications carry the BitKraken logo, which is unpacked out of the binary into the
-cache directory the first time one is shown, since a notification daemon can only be handed a path. macOS
-cannot: `display notification` always shows the icon of the process that raised the event — osascript's.
+All three carry the BitKraken logo, by two different routes. Linux and Windows take an image, so they are
+handed the logo unpacked out of the binary into the cache directory the first time one is shown — a
+notification daemon can only be given a path. macOS takes no image at all: it shows the icon of the bundle
+that posted the notification, which for `osascript` is Script Editor's. So there it is not the image that
+changes but the poster, which is what the helper below is for.
 
 All three are best-effort: a machine without the tool gets nothing, and the in-app toast is always shown as
 well, so nothing is ever only said out here.
+
+### The macOS notification helper
+
+macOS shows the icon of whichever *bundle* posted a notification, and there is no way to override it — which
+is why a plain `osascript` notification arrives as Script Editor, whatever image you hand it. So the `.app`
+carries a second, tiny bundle at `Contents/Helpers/BitKraken Notifier.app`: an empty AppleScript applet whose
+only job is to own BitKraken's icon. The app tells that bundle to post the notification, the command runs
+inside it, and the right face comes with it.
+
+It is built by [`scripts/package-macos.sh`](scripts/package-macos.sh) and signed with the app. A build running
+outside the bundle — straight off `dotnet run` — has no helper to ask, so the notification is posted the plain
+way and looks the way it always did. That fallback is automatic: if the helper is missing or refuses, macOS is
+never left with no notification at all.
+
+Two things follow from the notification being a different bundle. It asks for notification permission under
+its own name the first time it posts, and it appears on its own line in **System Settings → Notifications** —
+as "BitKraken", since that is the name and icon it carries.
 
 ## Watch folder
 

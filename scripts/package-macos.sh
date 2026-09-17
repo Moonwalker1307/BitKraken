@@ -48,6 +48,27 @@ for size in 16 32 128 256 512; do
 done
 iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/$APP_NAME.icns"
 
+# A notification wears the icon of the bundle that posted it, and osascript's bundle is Script
+# Editor's - which is why notifications never carried the logo however the image was passed. This
+# applet exists only to be a bundle with BitKraken's icon: the app tells it to post the notification
+# and the command runs in here, so the right face comes with it. It has no script of its own.
+echo "==> Building the notification helper"
+NOTIFIER="$APP/Contents/Helpers/$APP_NAME Notifier.app"
+mkdir -p "$APP/Contents/Helpers"
+printf 'on run\nend run\n' > "$STAGE/notifier.applescript"
+osacompile -o "$NOTIFIER" "$STAGE/notifier.applescript"
+
+# The applet ships with its own generic icon; replace it with ours, under the name osacompile wrote
+# into its Info.plist. The bundle id has to match DesktopNotifier.NotifierBundleId.
+cp "$APP/Contents/Resources/$APP_NAME.icns" "$NOTIFIER/Contents/Resources/applet.icns"
+NOTIFIER_PLIST="$NOTIFIER/Contents/Info.plist"
+plutil -replace CFBundleIdentifier -string "$BUNDLE_ID.notifier" "$NOTIFIER_PLIST"
+plutil -replace CFBundleName -string "$APP_NAME" "$NOTIFIER_PLIST"
+
+# No Dock icon and no menu bar for it: it is launched to post a notification, not to be used.
+plutil -replace LSUIElement -bool true "$NOTIFIER_PLIST" 2>/dev/null \
+  || plutil -insert LSUIElement -bool true "$NOTIFIER_PLIST"
+
 echo "==> Signing"
 if [ -n "${SIGNING_IDENTITY:-}" ]; then
   codesign --force --deep --options runtime --timestamp \
