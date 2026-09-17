@@ -269,7 +269,7 @@ Everything lands in `dist/`:
 The [installers workflow](.github/workflows/installers.yml) builds all five in parallel on macOS, Windows and Linux
 runners:
 
-- **Pull request** → builds a **preview**, `1.0.x-preview`, and uploads every platform's packages as workflow artifacts.
+- **Pull request** → builds a **preview**, `1.0.x-preview-<run>`, and uploads every platform's packages as workflow artifacts.
 - **Merge to `main`** → builds `1.0.x`, tags the commit `v1.0.x` and publishes a GitHub **release** with all the
   packages attached, so it shows up under *Releases*. Only pushes that touch [`src/`](src) build: a merge that
   changes nothing but docs, scripts or packaging is skipped and releases nothing.
@@ -285,9 +285,15 @@ computes it and can be run locally:
 
 ```bash
 scripts/next-version.sh release   # 1.0.3
-scripts/next-version.sh preview   # 1.0.3-preview
+scripts/next-version.sh preview   # 1.0.3-preview (1.0.3-preview-23 on a GitHub runner)
 scripts/next-version.sh current   # 1.0.2 (the latest released version)
 ```
+
+A preview also carries the workflow's run number — `1.0.3-preview-23`. Previews are never tagged, so
+without it every build of a pull request has the same name, and there is no telling from a file name, a
+title bar or a crash report which one someone is actually running. It comes from `GITHUB_RUN_NUMBER`,
+which only exists on a runner; locally the version stays `1.0.3-preview`. Releases never carry it —
+a release is tagged `v1.0.3`, and that tag is what the counter reads back.
 
 Releases are the source of truth for the counter, so nothing needs to be committed to bump a version. To move to a
 new series, push a tag for it (e.g. `v1.1.0`) or set `VERSION_SERIES=1.1`. Pre-release suffixes are kept in file

@@ -44,6 +44,39 @@ public class NextVersionScriptTests
     }
 
     [Fact]
+    public void A_preview_built_by_actions_carries_the_run_number()
+    {
+        if (OperatingSystem.IsWindows()) return;
+
+        // Previews are never tagged, so the run number is the only thing telling two builds of the
+        // same patch apart - in a file name, in the title bar and in a crash report.
+        Assert.Equal("1.0.3-preview-23", Run("preview", ["v1.0.0", "v1.0.1", "v1.0.2"], series: null, runNumber: "23"));
+    }
+
+    [Fact]
+    public void Only_previews_carry_the_run_number()
+    {
+        if (OperatingSystem.IsWindows()) return;
+
+        // A release is tagged v1.0.3, and that tag is what the counter reads back. A run number in
+        // it would make the next build collide with the release it was meant to follow.
+        Assert.Equal("1.0.3", Run("release", ["v1.0.0", "v1.0.1", "v1.0.2"], series: null, runNumber: "23"));
+        Assert.Equal("1.0.2", Run("current", ["v1.0.0", "v1.0.1", "v1.0.2"], series: null, runNumber: "23"));
+    }
+
+    [Theory]
+    [InlineData("")]                 // set but empty, which is how a non-Actions shell can leave it
+    [InlineData("not-a-number")]
+    [InlineData("7 8")]
+    [InlineData("7; rm -rf /")]      // nothing from the environment may reach the version verbatim
+    public void A_run_number_that_is_not_a_plain_number_is_ignored(string runNumber)
+    {
+        if (OperatingSystem.IsWindows()) return;
+
+        Assert.Equal("1.0.1-preview", Run("preview", ["v1.0.0"], series: null, runNumber: runNumber));
+    }
+
+    [Fact]
     public void Current_is_the_latest_released_version()
     {
         if (OperatingSystem.IsWindows()) return;
@@ -100,15 +133,15 @@ public class NextVersionScriptTests
 
     private static string Run(string? channel, params string[] tags) => Run(channel, tags, series: null);
 
-    private static string Run(string? channel, string[] tags, string? series)
+    private static string Run(string? channel, string[] tags, string? series, string? runNumber = null)
     {
-        var result = Execute(channel, tags, series);
+        var result = Execute(channel, tags, series, runNumber);
         Assert.True(result.ExitCode == 0, $"next-version.sh exited {result.ExitCode}: {result.StandardError}");
         return result.StandardOutput.Trim();
     }
 
     private static (int ExitCode, string StandardOutput, string StandardError) Execute(
-        string? channel, string[] tags, string? series)
+        string? channel, string[] tags, string? series, string? runNumber = null)
     {
         var repo = TestEnvironment.NewDirectory("next-version");
         Directory.CreateDirectory(Path.Combine(repo, "scripts"));
@@ -128,6 +161,14 @@ public class NextVersionScriptTests
         psi.ArgumentList.Add(Path.Combine(repo, "scripts", "next-version.sh"));
         if (channel is not null) psi.ArgumentList.Add(channel);
         if (series is not null) psi.Environment["VERSION_SERIES"] = series;
+
+        // Always set explicitly, never inherited: these tests run inside GitHub Actions too, where the
+        // runner exports GITHUB_RUN_NUMBER, and a test that expects a plain "-preview" would pick it
+        // up and fail on CI alone.
+        if (runNumber is null)
+            psi.Environment.Remove("GITHUB_RUN_NUMBER");
+        else
+            psi.Environment["GITHUB_RUN_NUMBER"] = runNumber;
 
         using var process = Process.Start(psi)!;
         var stdout = process.StandardOutput.ReadToEnd();
