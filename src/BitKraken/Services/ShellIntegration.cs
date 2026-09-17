@@ -87,8 +87,33 @@ public static class ShellIntegration
             Run("update-desktop-database", [applications], captureOutput: false);
         }
 
+        InstallIcon();
         SetDefaultHandler("x-scheme-handler/magnet");
         SetDefaultHandler("application/x-bittorrent");
+    }
+
+    /// <summary>
+    /// Puts the logo in the user's icon theme, which is what turns the desktop entry's
+    /// <c>Icon=bitkraken</c> - and the icon a notification daemon looks up for an app - from a name
+    /// that resolves to nothing into the BitKraken logo. The PNG is 512x512, so it goes in the size
+    /// directory of that name; the theme scales it down for the launcher and the notification popup.
+    /// </summary>
+    private static void InstallIcon()
+    {
+        if (AppIcon.FilePath is not { } source) return;
+
+        var directory = IconDirectory();
+        var installed = new FileInfo(Path.Combine(directory, AppIcon.Name + ".png"));
+
+        // This runs on every start, so only touch the theme when the icon is missing or has changed:
+        // rewriting it each time would mean a needless icon-cache rebuild on every launch.
+        if (installed.Exists && installed.Length == new FileInfo(source).Length) return;
+
+        Directory.CreateDirectory(directory);
+        File.Copy(source, installed.FullName, overwrite: true);
+
+        // Best-effort: GTK scans the directory when there is no cache, so a missing tool costs nothing.
+        Run("gtk-update-icon-cache", ["--force", "--quiet", Path.Combine(DataHome(), "icons", "hicolor")], captureOutput: false);
     }
 
     private static void SetDefaultHandler(string mimeType)
@@ -105,6 +130,9 @@ public static class ShellIntegration
         RemoveFromMimeApps(Path.Combine(ConfigHome(), "mimeapps.list"));
         RemoveFromMimeApps(Path.Combine(DataHome(), "applications", "mimeapps.list"));
 
+        var icon = Path.Combine(IconDirectory(), AppIcon.Name + ".png");
+        if (File.Exists(icon)) File.Delete(icon);
+
         var applications = Path.Combine(DataHome(), "applications");
         var path = Path.Combine(applications, DesktopFileName);
         if (!File.Exists(path)) return;
@@ -112,6 +140,8 @@ public static class ShellIntegration
         File.Delete(path);
         Run("update-desktop-database", [applications], captureOutput: false);
     }
+
+    private static string IconDirectory() => Path.Combine(DataHome(), "icons", "hicolor", "512x512", "apps");
 
     /// <summary>Removes bitkraken.desktop from every association list in a mimeapps.list, dropping lines it empties.</summary>
     private static void RemoveFromMimeApps(string path)

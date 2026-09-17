@@ -13,6 +13,9 @@ namespace BitKraken.Services;
 /// </list>
 /// Every path is best-effort: a desktop without the tool (a bare window manager, a locked-down box)
 /// gets nothing, and the in-app toast is always shown as well so nothing is only ever said out here.
+/// Linux and Windows are handed <see cref="AppIcon"/> so the notification carries the BitKraken logo.
+/// macOS cannot be: <c>display notification</c> always shows the icon of the process that raised the
+/// event, which is osascript's, and there is no way to override it short of shipping a signed helper.
 /// </summary>
 public static class DesktopNotifier
 {
@@ -20,19 +23,32 @@ public static class DesktopNotifier
     private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(10);
 
     /// <summary>
-    /// Raises a toast through PowerShell. Title and body arrive as environment variables so that no
-    /// amount of punctuation in a torrent's name can change what the script does. The app id is
+    /// Raises a toast through PowerShell. Title, body and icon path arrive as environment variables so
+    /// that no amount of punctuation in a torrent's name can change what the script does. The app id is
     /// PowerShell's own, because a toast has to be attributed to something the shell already knows
-    /// about - BitKraken would need its own registered AppUserModelID to appear under its own name.
+    /// about - BitKraken would need its own registered AppUserModelID to appear under its own name -
+    /// which is exactly why the logo goes in the toast's own image slot: it is the only place a toast
+    /// from an unpackaged app can show who sent it. Without an icon the script falls back to the
+    /// text-only template, since an image element left pointing at nothing renders as a blank square.
     /// </summary>
     private const string WindowsToastScript = """
         $ErrorActionPreference = 'Stop'
         [Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null
         [Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom.XmlDocument, ContentType = WindowsRuntime] | Out-Null
-        $template = [Windows.UI.Notifications.ToastNotificationManager]::GetTemplateContent([Windows.UI.Notifications.ToastTemplateType]::ToastText02)
+        $icon = $env:BITKRAKEN_NOTIFY_ICON
+        $layout = if ($icon) {
+            [Windows.UI.Notifications.ToastTemplateType]::ToastImageAndText02
+        } else {
+            [Windows.UI.Notifications.ToastTemplateType]::ToastText02
+        }
+        $template = [Windows.UI.Notifications.ToastNotificationManager]::GetTemplateContent($layout)
         $lines = $template.GetElementsByTagName('text')
         $lines.Item(0).AppendChild($template.CreateTextNode($env:BITKRAKEN_NOTIFY_TITLE)) | Out-Null
         $lines.Item(1).AppendChild($template.CreateTextNode($env:BITKRAKEN_NOTIFY_BODY)) | Out-Null
+        if ($icon) {
+            $images = $template.GetElementsByTagName('image')
+            $images.Item(0).Attributes.GetNamedItem('src').NodeValue = $icon
+        }
         $appId = '{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\WindowsPowerShell\v1.0\powershell.exe'
         [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier($appId).Show([Windows.UI.Notifications.ToastNotification]::new($template))
         """;
@@ -68,12 +84,30 @@ public static class DesktopNotifier
             Run(
                 "powershell.exe",
                 ["-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", WindowsToastScript],
-                new Dictionary<string, string> { ["BITKRAKEN_NOTIFY_TITLE"] = title, ["BITKRAKEN_NOTIFY_BODY"] = body });
+                new Dictionary<string, string>
+                {
+                    ["BITKRAKEN_NOTIFY_TITLE"] = title,
+                    ["BITKRAKEN_NOTIFY_BODY"] = body,
+                    // A toast reads its image as a URI, and an empty value tells the script there is none.
+                    ["BITKRAKEN_NOTIFY_ICON"] = ToastImageUri(AppIcon.FilePath),
+                });
         }
         else
         {
-            Run("notify-send", ["--app-name", AppInfo.Name, "--icon", "bitkraken", title, body], null);
+            // A path is what makes the logo show up on a desktop BitKraken was never installed into:
+            // the theme name only resolves once the icon sits in an icon directory, which is a
+            // best-effort side of registering the desktop entry and not something to depend on here.
+            Run("notify-send", ["--app-name", AppInfo.Name, "--icon", AppIcon.FilePath ?? AppIcon.Name, title, body], null);
         }
+    }
+
+    /// <summary>The logo as the <c>file:///</c> URI a toast's image element wants, or "" if we have no file.</summary>
+    private static string ToastImageUri(string? path)
+    {
+        if (string.IsNullOrEmpty(path)) return "";
+
+        try { return new Uri(path).AbsoluteUri; }
+        catch (UriFormatException) { return ""; }
     }
 
     /// <summary>Escapes a string for embedding in an AppleScript double-quoted literal.</summary>
