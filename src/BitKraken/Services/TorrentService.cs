@@ -47,6 +47,13 @@ public sealed class TorrentService : IAsyncDisposable
     private static readonly TimeSpan StopAnnounceWait = TimeSpan.Zero;
 
     /// <summary>
+    /// How long to wait for a stop that was already in flight before giving up on it. Every stop this
+    /// app starts returns in milliseconds - none of them wait on a tracker - so this only has to cover
+    /// a machine under load, never a dead announce.
+    /// </summary>
+    private static readonly TimeSpan StopSettleTimeout = TimeSpan.FromSeconds(10);
+
+    /// <summary>
     /// Picks pieces in order instead of rarest-first. Both of MonoTorrent's usual heuristics have to go:
     /// rarest-first reorders the whole torrent, and the randomiser shuffles whatever is left. File
     /// priorities are still honoured, so a file set to Highest is the one that fills up first.
@@ -275,16 +282,19 @@ public sealed class TorrentService : IAsyncDisposable
 
     public async Task RemoveAsync(TorrentManager manager, bool deleteData)
     {
-        var key = Key(manager);
-        Forget(key);
-        _preferences.Save();
-
-        // The engine refuses to unregister a torrent that is not stopped, so this has to finish first.
-        if (manager.State != TorrentState.Stopped)
-            await SafeStopAsync(manager);
+        // The engine refuses to unregister a torrent that is not stopped, and says so in words that
+        // mean nothing to anyone reading a toast, so make sure of it before handing it over.
+        if (!await StopCompletelyAsync(manager))
+            throw new InvalidOperationException($"\"{manager.Name}\" is still stopping. Try removing it again in a moment.");
 
         var mode = deleteData ? RemoveMode.CacheDataAndDownloadedData : RemoveMode.CacheDataOnly;
         await Engine.RemoveAsync(manager, mode);
+
+        // Forgotten only once the engine has really let go: undoing this first would lose the torrent's
+        // queue position, its paused state and its totals while leaving the torrent itself in the list.
+        Forget(Key(manager));
+        _preferences.Save();
+
         TorrentRemoved?.Invoke(this, manager);
         _ = SaveStateAsync();
 
@@ -367,7 +377,7 @@ public sealed class TorrentService : IAsyncDisposable
             return;
         }
 
-        if (manager.State != TorrentState.Stopped) await SafeStopAsync(manager);
+        await StopCompletelyAsync(manager);
         await ApplyPickerAsync(manager);
         await ReconcileAsync();
     }
@@ -904,6 +914,32 @@ public sealed class TorrentService : IAsyncDisposable
         {
             EngineError?.Invoke(this, $"Could not start \"{manager.Name}\": {ex.Message}");
         }
+    }
+
+    /// <summary>
+    /// Brings a torrent to a complete stop, the state the engine insists on before it will unregister
+    /// one or take a new piece picker.
+    /// </summary>
+    /// <remarks>
+    /// The case that matters is a stop already in flight: the reconcile loop stops torrents on its own
+    /// schedule, and pausing one starts a stop that the UI does not wait around for. MonoTorrent
+    /// refuses to begin a second stop while a torrent is Stopping, and swallowing that refusal - which
+    /// <see cref="SafeStopAsync"/> does, rightly, for the callers that only want it stopped eventually -
+    /// is what let a half-stopped torrent reach the engine and come back as "The manager must be
+    /// stopped before it can be unregistered". So the refusal is waited out instead.
+    /// </remarks>
+    private static async Task<bool> StopCompletelyAsync(TorrentManager manager)
+    {
+        if (manager.State == TorrentState.Stopped) return true;
+
+        // Asking again while it is already Stopping is the one thing that throws, so don't.
+        if (manager.State != TorrentState.Stopping) await SafeStopAsync(manager);
+
+        var deadline = DateTime.UtcNow + StopSettleTimeout;
+        while (manager.State != TorrentState.Stopped && DateTime.UtcNow < deadline)
+            await Task.Delay(25);
+
+        return manager.State == TorrentState.Stopped;
     }
 
     private static async Task SafeStopAsync(TorrentManager manager)
