@@ -39,4 +39,20 @@ public static class Format
         if (downloaded <= 0) return uploaded > 0 ? "∞" : "0.00";
         return $"{(double)uploaded / downloaded:0.00}";
     }
+
+    /// <summary>A share ratio that has already been worked out.</summary>
+    public static string Ratio(double ratio) => double.IsFinite(ratio) ? $"{Math.Max(0, ratio):0.00}" : "∞";
+
+    /// <summary>
+    /// A stretch of time that has already passed - how long a torrent has been seeding, say. Unlike
+    /// <see cref="Eta"/> it never gives up and says "∞", because this one has actually happened.
+    /// </summary>
+    public static string Duration(TimeSpan span)
+    {
+        if (span <= TimeSpan.Zero) return "0m";
+        if (span.TotalDays >= 1) return $"{(int)span.TotalDays}d {span.Hours}h";
+        if (span.TotalHours >= 1) return $"{(int)span.TotalHours}h {span.Minutes}m";
+        if (span.TotalMinutes >= 1) return $"{(int)span.TotalMinutes}m";
+        return $"{span.Seconds}s";
+    }
 }

@@ -37,6 +37,19 @@ public sealed partial class SettingsViewModel : ViewModelBase
         _autoStartMagnetFromClipboard = settings.AutoStartMagnetFromClipboard;
         _handleMagnetLinks = settings.HandleMagnetLinks;
         _animatedBackground = settings.AnimatedBackground;
+        _maxActiveDownloads = settings.MaxActiveDownloads;
+        _maxActiveSeeds = settings.MaxActiveSeeds;
+        _seedRatioLimit = settings.SeedRatioLimit;
+        _seedTimeLimitMinutes = settings.SeedTimeLimitMinutes;
+        _sequentialDownload = settings.SequentialDownload;
+        _showTrayIcon = settings.ShowTrayIcon;
+        _minimizeToTray = settings.MinimizeToTray;
+        _closeToTray = settings.CloseToTray;
+        _notifyOnComplete = settings.NotifyOnComplete;
+        _notifyOnError = settings.NotifyOnError;
+        _watchFolder = settings.WatchFolder ?? "";
+        WatchFolderActions = WatchFolderActionChoice.All;
+        _selectedWatchFolderAction = WatchFolderActions.First(c => c.Action == settings.WatchFolderAction);
     }
 
     [ObservableProperty] private string _downloadDirectory;
@@ -64,14 +77,42 @@ public sealed partial class SettingsViewModel : ViewModelBase
     [ObservableProperty] private bool _autoStartMagnetFromClipboard;
     [ObservableProperty] private bool _handleMagnetLinks;
     [ObservableProperty] private bool _animatedBackground;
+    [ObservableProperty] private int _maxActiveDownloads;
+    [ObservableProperty] private int _maxActiveSeeds;
+    [ObservableProperty] private double _seedRatioLimit;
+    [ObservableProperty] private int _seedTimeLimitMinutes;
+    [ObservableProperty] private bool _sequentialDownload;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsTrayEnabled))]
+    private bool _showTrayIcon;
+
+    [ObservableProperty] private bool _minimizeToTray;
+    [ObservableProperty] private bool _closeToTray;
+    [ObservableProperty] private bool _notifyOnComplete;
+    [ObservableProperty] private bool _notifyOnError;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsWatchFolderSet))]
+    private string _watchFolder;
+
+    [ObservableProperty] private WatchFolderActionChoice _selectedWatchFolderAction;
 
     /// <summary>"Any", plus every interface the machine currently has.</summary>
     public IReadOnlyList<NetworkInterfaceChoice> NetworkInterfaces { get; }
 
     public IReadOnlyList<ProxyModeChoice> ProxyModes { get; }
 
+    public IReadOnlyList<WatchFolderActionChoice> WatchFolderActions { get; }
+
     /// <summary>Greys out the proxy address fields while no proxy is selected.</summary>
     public bool IsProxyEnabled => SelectedProxyMode.Mode != ProxyMode.None;
+
+    /// <summary>Greys out the hide-to-tray options while there is no tray icon to hide into.</summary>
+    public bool IsTrayEnabled => ShowTrayIcon;
+
+    /// <summary>Greys out the post-add action while no folder is being watched.</summary>
+    public bool IsWatchFolderSet => WatchFolder.Trim().Length > 0;
 
     public string CacheDirectory => SettingsService.AppDataDirectory;
 
@@ -100,14 +141,39 @@ public sealed partial class SettingsViewModel : ViewModelBase
         AutoStartMagnetFromClipboard = AutoStartMagnetFromClipboard,
         HandleMagnetLinks = HandleMagnetLinks,
         AnimatedBackground = AnimatedBackground,
+        MaxActiveDownloads = Math.Clamp(MaxActiveDownloads, 0, 200),
+        MaxActiveSeeds = Math.Clamp(MaxActiveSeeds, 0, 200),
+        SeedRatioLimit = Math.Clamp(SeedRatioLimit, 0, 10000),
+        SeedTimeLimitMinutes = Math.Clamp(SeedTimeLimitMinutes, 0, 525600),
+        SequentialDownload = SequentialDownload,
+        ShowTrayIcon = ShowTrayIcon,
+
+        // Hiding the window with no icon to hide it into would leave no way to get it back.
+        MinimizeToTray = MinimizeToTray && ShowTrayIcon,
+        CloseToTray = CloseToTray && ShowTrayIcon,
+        NotifyOnComplete = NotifyOnComplete,
+        NotifyOnError = NotifyOnError,
+        WatchFolder = WatchFolder.Trim(),
+        WatchFolderAction = SelectedWatchFolderAction.Action,
     };
 
     [RelayCommand]
     private async Task BrowseFolder()
     {
-        var folder = await _dialogs.PickFolderAsync(DownloadDirectory);
+        var folder = await _dialogs.PickFolderAsync(DownloadDirectory, "Choose download folder");
         if (folder is not null) DownloadDirectory = folder;
     }
+
+    [RelayCommand]
+    private async Task BrowseWatchFolder()
+    {
+        var start = IsWatchFolderSet ? WatchFolder : DownloadDirectory;
+        var folder = await _dialogs.PickFolderAsync(start, "Choose a folder to watch for .torrent files");
+        if (folder is not null) WatchFolder = folder;
+    }
+
+    [RelayCommand]
+    private void ClearWatchFolder() => WatchFolder = "";
 
     [RelayCommand]
     private void OpenCacheFolder() => _dialogs.OpenInFileManager(SettingsService.AppDataDirectory);
@@ -172,5 +238,25 @@ public sealed class ProxyModeChoice
         new(ProxyMode.None, "No proxy"),
         new(ProxyMode.Socks5, "SOCKS5"),
         new(ProxyMode.Http, "HTTP (CONNECT)"),
+    ];
+}
+
+/// <summary>One entry in the "once added" list for the watch folder.</summary>
+public sealed class WatchFolderActionChoice
+{
+    private WatchFolderActionChoice(WatchFolderAction action, string display)
+    {
+        Action = action;
+        Display = display;
+    }
+
+    public WatchFolderAction Action { get; }
+
+    public string Display { get; }
+
+    public static IReadOnlyList<WatchFolderActionChoice> All { get; } =
+    [
+        new(WatchFolderAction.MarkAsAdded, "Rename to .added"),
+        new(WatchFolderAction.Delete, "Delete the file"),
     ];
 }

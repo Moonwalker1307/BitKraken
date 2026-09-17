@@ -5,7 +5,7 @@
         x:Class="BitKraken.Views.SettingsDialog"
         x:DataType="vm:SettingsViewModel"
         Title="Settings"
-        Width="620" Height="720"
+        Width="620" Height="760"
         CanResize="False"
         WindowStartupLocation="CenterOwner"
         WindowDecorations="None"
@@ -99,6 +99,83 @@
                                 <TextBlock Text="Makes BitKraken the handler for magnet links and .torrent files." Classes="hint" />
                             </StackPanel>
                             <ToggleSwitch Grid.Column="1" IsChecked="{Binding HandleMagnetLinks}" OnContent="" OffContent="" />
+                        </Grid>
+                    </Border>
+
+                    <Border Classes="row">
+                        <Grid ColumnDefinitions="*,Auto">
+                            <StackPanel>
+                                <TextBlock Text="Download pieces in order" />
+                                <TextBlock Text="Fills a file from the start instead of rarest-first, so a partial download plays. Slightly slower overall. Set one file to Highest priority and it goes first." Classes="hint" />
+                            </StackPanel>
+                            <ToggleSwitch Grid.Column="1" IsChecked="{Binding SequentialDownload}" OnContent="" OffContent="" />
+                        </Grid>
+                    </Border>
+                    <Border Classes="row">
+                        <StackPanel Spacing="6">
+                            <TextBlock Text="Watch folder" />
+                            <TextBlock Text="Any .torrent file dropped in here is added automatically." Classes="hint" />
+                            <Grid ColumnDefinitions="*,Auto,Auto">
+                                <TextBox Text="{Binding WatchFolder}" PlaceholderText="no folder watched" />
+                                <Button Grid.Column="1" Classes="ghost icon" Margin="6,0,0,0" Command="{Binding BrowseWatchFolderCommand}">
+                                    <PathIcon Data="{StaticResource Icon.Folder}" Width="16" Height="16" />
+                                </Button>
+                                <Button Grid.Column="2" Classes="ghost icon" Margin="6,0,0,0" Command="{Binding ClearWatchFolderCommand}"
+                                        IsVisible="{Binding IsWatchFolderSet}" ToolTip.Tip="Stop watching">
+                                    <PathIcon Data="{StaticResource Icon.Close}" Width="12" Height="12" />
+                                </Button>
+                            </Grid>
+                            <Grid ColumnDefinitions="*,Auto" IsEnabled="{Binding IsWatchFolderSet}">
+                                <TextBlock Text="Once added" VerticalAlignment="Center" Classes="hint" />
+                                <ComboBox Grid.Column="1" Width="220" MinHeight="34"
+                                          ItemsSource="{Binding WatchFolderActions}"
+                                          SelectedItem="{Binding SelectedWatchFolderAction}">
+                                    <ComboBox.ItemTemplate>
+                                        <DataTemplate x:DataType="vm:WatchFolderActionChoice">
+                                            <TextBlock Text="{Binding Display}" TextTrimming="CharacterEllipsis" />
+                                        </DataTemplate>
+                                    </ComboBox.ItemTemplate>
+                                </ComboBox>
+                            </Grid>
+                        </StackPanel>
+                    </Border>
+
+                    <TextBlock Text="QUEUE" Classes="section" />
+                    <Border Classes="row">
+                        <Grid ColumnDefinitions="*,Auto">
+                            <StackPanel>
+                                <TextBlock Text="Active downloads" />
+                                <TextBlock Text="The rest wait their turn. 0 = no limit." Classes="hint" />
+                            </StackPanel>
+                            <NumericUpDown Grid.Column="1" Value="{Binding MaxActiveDownloads}" Minimum="0" Maximum="200" Increment="1" />
+                        </Grid>
+                    </Border>
+                    <Border Classes="row">
+                        <Grid ColumnDefinitions="*,Auto">
+                            <StackPanel>
+                                <TextBlock Text="Active seeds" />
+                                <TextBlock Text="Counted separately, so finished torrents never crowd out a download. 0 = no limit." Classes="hint" />
+                            </StackPanel>
+                            <NumericUpDown Grid.Column="1" Value="{Binding MaxActiveSeeds}" Minimum="0" Maximum="200" Increment="1" />
+                        </Grid>
+                    </Border>
+                    <Border Classes="row">
+                        <Grid ColumnDefinitions="*,Auto">
+                            <StackPanel>
+                                <TextBlock Text="Stop seeding at ratio" />
+                                <TextBlock Text="0 = seed forever. Counted across restarts. A torrent you start by hand keeps seeding past its limit." Classes="hint" />
+                            </StackPanel>
+                            <NumericUpDown Grid.Column="1" Value="{Binding SeedRatioLimit}" Minimum="0" Maximum="10000"
+                                           Increment="0.1" FormatString="0.##" />
+                        </Grid>
+                    </Border>
+                    <Border Classes="row">
+                        <Grid ColumnDefinitions="*,Auto">
+                            <StackPanel>
+                                <TextBlock Text="Stop seeding after (minutes)" />
+                                <TextBlock Text="0 = seed forever. Only time actually spent seeding counts." Classes="hint" />
+                            </StackPanel>
+                            <NumericUpDown Grid.Column="1" Value="{Binding SeedTimeLimitMinutes}" Minimum="0" Maximum="525600" Increment="30" />
                         </Grid>
                     </Border>
 
@@ -226,7 +303,7 @@
                         <Grid ColumnDefinitions="*,Auto">
                             <TextBlock Text="Proxy address" VerticalAlignment="Center" />
                             <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6">
-                                <TextBox Text="{Binding ProxyHost}" Width="160" Watermark="host or IP" />
+                                <TextBox Text="{Binding ProxyHost}" Width="160" PlaceholderText="host or IP" />
                                 <NumericUpDown Value="{Binding ProxyPort}" Minimum="1" Maximum="65535" Increment="1" Width="110" />
                             </StackPanel>
                         </Grid>
@@ -238,9 +315,50 @@
                                 <TextBlock Text="Leave blank if the proxy doesn't need it. Kept in settings.json as plain text." Classes="hint" />
                             </StackPanel>
                             <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6">
-                                <TextBox Text="{Binding ProxyUsername}" Width="130" Watermark="username" />
-                                <TextBox Text="{Binding ProxyPassword}" Width="140" Watermark="password" PasswordChar="●" />
+                                <TextBox Text="{Binding ProxyUsername}" Width="130" PlaceholderText="username" />
+                                <TextBox Text="{Binding ProxyPassword}" Width="140" PlaceholderText="password" PasswordChar="●" />
                             </StackPanel>
+                        </Grid>
+                    </Border>
+
+                    <TextBlock Text="TRAY &amp; NOTIFICATIONS" Classes="section" />
+                    <Border Classes="row">
+                        <Grid ColumnDefinitions="*,Auto">
+                            <StackPanel>
+                                <TextBlock Text="Show in the system tray" />
+                                <TextBlock Text="An icon in the tray (menu bar on macOS) that reopens the window and can start or pause everything." Classes="hint" />
+                            </StackPanel>
+                            <ToggleSwitch Grid.Column="1" IsChecked="{Binding ShowTrayIcon}" OnContent="" OffContent="" />
+                        </Grid>
+                    </Border>
+                    <Border Classes="row" IsEnabled="{Binding IsTrayEnabled}">
+                        <Grid ColumnDefinitions="*,Auto">
+                            <TextBlock Text="Minimize to the tray" VerticalAlignment="Center" />
+                            <ToggleSwitch Grid.Column="1" IsChecked="{Binding MinimizeToTray}" OnContent="" OffContent="" />
+                        </Grid>
+                    </Border>
+                    <Border Classes="row" IsEnabled="{Binding IsTrayEnabled}">
+                        <Grid ColumnDefinitions="*,Auto">
+                            <StackPanel>
+                                <TextBlock Text="Close to the tray" />
+                                <TextBlock Text="Closing the window keeps BitKraken running. Quit from the tray menu to stop it." Classes="hint" />
+                            </StackPanel>
+                            <ToggleSwitch Grid.Column="1" IsChecked="{Binding CloseToTray}" OnContent="" OffContent="" />
+                        </Grid>
+                    </Border>
+                    <Border Classes="row">
+                        <Grid ColumnDefinitions="*,Auto">
+                            <StackPanel>
+                                <TextBlock Text="Notify when a torrent finishes" />
+                                <TextBlock Text="Uses the desktop's own notifications." Classes="hint" />
+                            </StackPanel>
+                            <ToggleSwitch Grid.Column="1" IsChecked="{Binding NotifyOnComplete}" OnContent="" OffContent="" />
+                        </Grid>
+                    </Border>
+                    <Border Classes="row">
+                        <Grid ColumnDefinitions="*,Auto">
+                            <TextBlock Text="Notify when a torrent fails" VerticalAlignment="Center" />
+                            <ToggleSwitch Grid.Column="1" IsChecked="{Binding NotifyOnError}" OnContent="" OffContent="" />
                         </Grid>
                     </Border>
 

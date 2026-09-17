@@ -37,17 +37,27 @@ public partial class MainWindow : Window, IDialogService
 
         KeyDown += OnKeyDown;
         Closing += OnClosing;
+        PropertyChanged += OnWindowPropertyChanged;
 
         Diagnostics.DebugHooks.Attach(this);
     }
 
     private bool _shutdownComplete;
 
-    /// <summary>Intercepts the first close to flush fast-resume data and stop the engine cleanly, then closes for real.</summary>
+    /// <summary>
+    /// Intercepts the first close to flush fast-resume data and stop the engine cleanly, then closes for
+    /// real - unless BitKraken is set to carry on in the tray, in which case the window only hides.
+    /// </summary>
     private async void OnClosing(object? sender, WindowClosingEventArgs e)
     {
         if (_shutdownComplete) return;
         e.Cancel = true;
+
+        if (App.Current?.ShouldCloseToTray == true)
+        {
+            Hide();
+            return;
+        }
 
         try
         {
@@ -58,6 +68,21 @@ public partial class MainWindow : Window, IDialogService
             _shutdownComplete = true;
             Close();
         }
+    }
+
+    /// <summary>
+    /// Minimizing to the tray means hiding rather than minimizing: a hidden window leaves no taskbar
+    /// button behind, which is the point. The state is put back first so the window is the right size
+    /// when it comes back.
+    /// </summary>
+    private void OnWindowPropertyChanged(object? sender, AvaloniaPropertyChangedEventArgs e)
+    {
+        if (e.Property != WindowStateProperty) return;
+        if (e.GetNewValue<WindowState>() != WindowState.Minimized) return;
+        if (App.Current?.ShouldMinimizeToTray != true) return;
+
+        WindowState = WindowState.Normal;
+        Hide();
     }
 
     private void ConfigureChrome()
@@ -152,7 +177,7 @@ public partial class MainWindow : Window, IDialogService
         return files.Select(f => f.TryGetLocalPath()).Where(p => p is not null).Cast<string>().ToList();
     }
 
-    public async Task<string?> PickFolderAsync(string? initialDirectory)
+    public async Task<string?> PickFolderAsync(string? initialDirectory, string title)
     {
         IStorageFolder? start = null;
         if (initialDirectory is not null && Directory.Exists(initialDirectory))
@@ -160,7 +185,7 @@ public partial class MainWindow : Window, IDialogService
 
         var folders = await StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
         {
-            Title = "Choose download folder",
+            Title = title,
             AllowMultiple = false,
             SuggestedStartLocation = start,
         });

@@ -1,23 +1,44 @@
 using System.Net;
 using System.Net.Sockets;
-using System.Text.Json;
 using BitKraken.Models;
 using MonoTorrent;
 using MonoTorrent.Client;
 using MonoTorrent.Connections;
 using MonoTorrent.Connections.Peer;
 using MonoTorrent.Connections.Tracker;
+using MonoTorrent.PiecePicking;
 using MonoTorrent.Trackers;
 
 namespace BitKraken.Services;
 
+/// <summary>Everything one torrent has shifted, added up across every session it has run in.</summary>
+public readonly record struct TorrentTotals(long Uploaded, long Downloaded, TimeSpan Seeded);
+
 /// <summary>
 /// Thin wrapper around MonoTorrent's <see cref="ClientEngine"/>. Owns engine lifetime, persistence
-/// (engine state + fast-resume + which torrents the user paused) and settings application.
+/// (engine state + fast-resume + per-torrent preferences) and settings application.
 /// </summary>
+/// <remarks>
+/// What is actually running is not decided at the call sites. Every reason a torrent might be stopped -
+/// the user paused it, the bound interface went away, the queue is full, it has seeded its fill - feeds
+/// into <see cref="ReconcileAsync"/>, which works out the set that should be running and moves the
+/// engine to it. Callers change the inputs and ask for a reconcile; only the reconcile starts or stops.
+/// </remarks>
 public sealed class TorrentService : IAsyncDisposable
 {
-    private static readonly string PausedStatePath = Path.Combine(SettingsService.AppDataDirectory, "paused.json");
+    /// <summary>How often the running set is re-derived, and the window transfer totals are sampled over.</summary>
+    private static readonly TimeSpan ReconcileInterval = TimeSpan.FromSeconds(2);
+
+    /// <summary>Per-torrent preferences are written at most this often while only the totals are moving.</summary>
+    private static readonly TimeSpan PreferenceSaveInterval = TimeSpan.FromSeconds(30);
+
+    /// <summary>
+    /// Picks pieces in order instead of rarest-first. Both of MonoTorrent's usual heuristics have to go:
+    /// rarest-first reorders the whole torrent, and the randomiser shuffles whatever is left. File
+    /// priorities are still honoured, so a file set to Highest is the one that fills up first.
+    /// </summary>
+    private static readonly PieceRequesterSettings LinearPicking =
+        new(allowPrioritisation: true, allowRandomised: false, allowRarestFirst: false);
 
     /// <summary>
     /// Well-known open trackers appended to public torrents when <see cref="AppSettings.AddFallbackTrackers"/>
@@ -34,20 +55,38 @@ public sealed class TorrentService : IAsyncDisposable
     ];
 
     private readonly SettingsService _settings;
+    private readonly TorrentPreferences _preferences;
     private readonly NetworkBinding _binding;
     private readonly Factories _factories;
-    private readonly TorrentActivation _activation = new();
     private readonly SemaphoreSlim _stateLock = new(1, 1);
     private readonly SemaphoreSlim _networkLock = new(1, 1);
+    private readonly SemaphoreSlim _reconcileLock = new(1, 1);
+
+    /// <summary>The picker each torrent was last given, so we only cycle one when the mode really changed.</summary>
+    private readonly Dictionary<string, bool> _appliedSequential = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Last sample of each torrent's session counters, for turning them into running totals.</summary>
+    private readonly Dictionary<string, (long Received, long Sent)> _lastCounters = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Torrents the user restarted past their seeding limit. Session-only, and deliberately so.</summary>
+    private readonly HashSet<string> _seedLimitWaived = new(StringComparer.OrdinalIgnoreCase);
+
+    private Timer? _reconcileTimer;
     private ClientEngine? _engine;
     private bool _shuttingDown;
+    private bool _networkSuspended;
+    private int _reconcilePending;
+    private DateTime _lastSample;
+    private DateTime _lastPreferenceSave = DateTime.UtcNow;
+    private IReadOnlyDictionary<string, int> _waiting = QueuePlan.Empty.Waiting;
 
     // The route in force the last time settings were applied, so we can tell when it moved.
     private (ProxyConfiguration Proxy, string Interface) _appliedRoute;
 
-    public TorrentService(SettingsService settings, NetworkBinding binding)
+    public TorrentService(SettingsService settings, TorrentPreferences preferences, NetworkBinding binding)
     {
         _settings = settings;
+        _preferences = preferences;
         _binding = binding;
 
         // Every socket the engine opens goes through these, so the binding and the proxy cover peers and
@@ -76,21 +115,28 @@ public sealed class TorrentService : IAsyncDisposable
     public event EventHandler<TorrentManager>? TorrentRemoved;
     public event EventHandler<string>? EngineError;
 
+    /// <summary>Raised when a torrent finishes downloading and starts seeding.</summary>
+    public event EventHandler<TorrentManager>? TorrentCompleted;
+
+    /// <summary>Raised when a torrent drops into the error state.</summary>
+    public event EventHandler<TorrentManager>? TorrentFailed;
+
+    /// <summary>Raised when a torrent has seeded as much as its limits allow and has been stopped.</summary>
+    public event EventHandler<TorrentManager>? SeedLimitReached;
+
     /// <summary>Raised when the kill switch trips (true) or lifts (false).</summary>
     public event EventHandler<bool>? NetworkSuspendedChanged;
 
     /// <summary>True while everything is held because the bound interface is gone.</summary>
-    public bool IsNetworkSuspended => _activation.IsSuspended;
+    public bool IsNetworkSuspended => _networkSuspended;
 
-    /// <summary>Creates (or restores) the engine and starts all torrents that weren't paused by the user.</summary>
+    /// <summary>Creates (or restores) the engine and starts whatever the queue allows.</summary>
     public async Task InitializeAsync()
     {
         if (_engine is not null) return;
 
-        LoadPausedSet();
-
         // A tunnel that is already down at startup means we never start anything in the first place.
-        if (!_binding.Current.IsAvailable) _activation.Suspend();
+        _networkSuspended = !_binding.Current.IsAvailable;
 
         ClientEngine? engine = null;
         if (File.Exists(SettingsService.EngineStatePath))
@@ -115,15 +161,17 @@ public sealed class TorrentService : IAsyncDisposable
 
         foreach (var manager in engine.Torrents.ToList())
         {
-            HookManager(manager);
+            Track(manager);
             TorrentAdded?.Invoke(this, manager);
 
             // Cheap (no network I/O) and idempotent, so it's safe to redo on every restore.
             await AddFallbackTrackersAsync(manager);
-
-            if (_activation.RequestRestore(Key(manager)))
-                _ = SafeStartAsync(manager);
+            await manager.UpdateSettingsAsync(BuildTorrentSettings(Key(manager)));
         }
+
+        _lastSample = DateTime.UtcNow;
+        _reconcileTimer = new Timer(_ => RequestReconcile(), null, ReconcileInterval, ReconcileInterval);
+        await ReconcileAsync();
     }
 
     public async Task<TorrentManager> AddTorrentFileAsync(string path, string? saveDirectory = null, bool? autoStart = null)
@@ -132,7 +180,11 @@ public sealed class TorrentService : IAsyncDisposable
         if (Engine.Contains(torrent.InfoHashes))
             throw new InvalidOperationException($"\"{torrent.Name}\" is already in your list.");
 
-        var manager = await Engine.AddAsync(torrent, saveDirectory ?? _settings.Current.DownloadDirectory, BuildTorrentSettings());
+        var manager = await Engine.AddAsync(
+            torrent,
+            saveDirectory ?? _settings.Current.DownloadDirectory,
+            BuildTorrentSettings(torrent.InfoHashes.V1OrV2.ToHex()));
+
         return await FinishAddAsync(manager, autoStart);
     }
 
@@ -144,57 +196,67 @@ public sealed class TorrentService : IAsyncDisposable
         if (Engine.Contains(magnet.InfoHashes))
             throw new InvalidOperationException($"\"{magnet.Name ?? magnet.InfoHashes.V1OrV2.ToHex()}\" is already in your list.");
 
-        var manager = await Engine.AddAsync(magnet, saveDirectory ?? _settings.Current.DownloadDirectory, BuildTorrentSettings());
+        var manager = await Engine.AddAsync(
+            magnet,
+            saveDirectory ?? _settings.Current.DownloadDirectory,
+            BuildTorrentSettings(magnet.InfoHashes.V1OrV2.ToHex()));
+
         return await FinishAddAsync(manager, autoStart);
     }
 
     private async Task<TorrentManager> FinishAddAsync(TorrentManager manager, bool? autoStart)
     {
-        HookManager(manager);
+        var key = Key(manager);
+        Track(manager);
         TorrentAdded?.Invoke(this, manager);
 
         await AddFallbackTrackersAsync(manager);
 
+        // A torrent added without auto-start is paused, not queued: it waits for the user, not a slot.
         var start = autoStart ?? _settings.Current.StartTorrentsAutomatically;
-        if (start)
-        {
-            if (_activation.RequestStart(Key(manager)))
-                await SafeStartAsync(manager);
-        }
-        else
-        {
-            _activation.Pause(Key(manager));
-        }
+        _preferences.Update(key, e => e.PausedByUser = !start);
+        _preferences.Save();
 
-        SavePausedSet();
+        await ReconcileAsync();
         _ = SaveStateAsync();
         return manager;
     }
 
+    /// <summary>The user asked for this torrent. Whether it runs now is still up to the queue.</summary>
     public async Task StartAsync(TorrentManager manager)
     {
-        var start = _activation.RequestStart(Key(manager));
-        SavePausedSet();
+        var key = Key(manager);
+        _preferences.Update(key, e =>
+        {
+            e.PausedByUser = false;
+            e.SeedLimitReached = false;
+        });
 
-        // Suspended: the torrent is now queued rather than paused, and starts itself when the
-        // interface is back. Starting it now would only spray failed connections.
-        if (start) await SafeStartAsync(manager);
+        // Starting a torrent by hand overrides its seeding limit for the rest of the session. Re-arming
+        // it here would only stop the torrent again a second later, which is not what the click meant.
+        if (SeedLimitFor(key).IsReached(RatioOf(manager), SeededFor(key)))
+            _seedLimitWaived.Add(key);
+
+        _preferences.Save();
+
+        // An errored torrent has to be put back to Stopped before anything can start it again.
+        if (manager.State == TorrentState.Error) await SafeStopAsync(manager);
+
+        await ReconcileAsync();
     }
 
     public async Task PauseAsync(TorrentManager manager)
     {
-        _activation.Pause(Key(manager));
-        SavePausedSet();
-
-        // MonoTorrent's Pause only works from an active state; Stop is the more robust "hold" for the UI.
-        if (manager.State is TorrentState.Downloading or TorrentState.Seeding or TorrentState.Metadata or TorrentState.Hashing or TorrentState.Starting)
-            await manager.StopAsync();
+        _preferences.Update(Key(manager), e => e.PausedByUser = true);
+        _preferences.Save();
+        await ReconcileAsync();
     }
 
     public async Task RemoveAsync(TorrentManager manager, bool deleteData)
     {
-        _activation.Forget(Key(manager));
-        SavePausedSet();
+        var key = Key(manager);
+        Forget(key);
+        _preferences.Save();
 
         if (manager.State != TorrentState.Stopped)
             await manager.StopAsync(TimeSpan.FromSeconds(5));
@@ -203,20 +265,335 @@ public sealed class TorrentService : IAsyncDisposable
         await Engine.RemoveAsync(manager, mode);
         TorrentRemoved?.Invoke(this, manager);
         _ = SaveStateAsync();
+        await ReconcileAsync();
     }
 
     public async Task RecheckAsync(TorrentManager manager)
     {
         if (manager.State != TorrentState.Stopped)
             await manager.StopAsync();
-        await manager.HashCheckAsync(autoStart: _activation.RequestRestore(Key(manager)));
+
+        // The reconcile starts it again afterwards if it is still owed a slot, so the check itself
+        // never jumps the queue.
+        await manager.HashCheckAsync(autoStart: false);
+        await ReconcileAsync();
     }
 
-    public Task StartAllAsync() => Task.WhenAll(Engine.Torrents.Select(StartAsync));
-    public Task PauseAllAsync() => Task.WhenAll(Engine.Torrents.Select(PauseAsync));
+    public Task StartAllAsync() => SetPausedForAllAsync(paused: false);
+    public Task PauseAllAsync() => SetPausedForAllAsync(paused: true);
+
+    private async Task SetPausedForAllAsync(bool paused)
+    {
+        foreach (var manager in Engine.Torrents.ToList())
+        {
+            var key = Key(manager);
+            _preferences.Update(key, e =>
+            {
+                e.PausedByUser = paused;
+                if (!paused) e.SeedLimitReached = false;
+            });
+
+            if (!paused && SeedLimitFor(key).IsReached(RatioOf(manager), SeededFor(key)))
+                _seedLimitWaived.Add(key);
+        }
+
+        _preferences.Save();
+        await ReconcileAsync();
+    }
 
     public async Task SetFilePriorityAsync(TorrentManager manager, ITorrentManagerFile file, Priority priority)
         => await manager.SetFilePriorityAsync(file, priority);
+
+    // ----- Per-torrent settings ------------------------------------------------------------------------------------
+
+    /// <summary>What BitKraken remembers about this torrent. Read-only as far as callers are concerned.</summary>
+    public TorrentOverrides OverridesFor(TorrentManager manager) => _preferences.Get(Key(manager));
+
+    /// <summary>Everything this torrent has shifted, across every session.</summary>
+    public TorrentTotals TotalsFor(TorrentManager manager)
+    {
+        var overrides = _preferences.Get(Key(manager));
+        return new TorrentTotals(overrides.TotalUploaded, overrides.TotalDownloaded, TimeSpan.FromSeconds(overrides.SecondsSeeded));
+    }
+
+    /// <summary>The seeding limit in force for this torrent, as the UI shows it. Empty when it has none.</summary>
+    public string SeedLimitTextFor(TorrentManager manager) => SeedLimitFor(Key(manager)).Describe();
+
+    /// <summary>Where this torrent is waiting, or null if it is not being held back by the queue.</summary>
+    public int? QueuePositionOf(TorrentManager manager) =>
+        _waiting.TryGetValue(Key(manager), out var place) ? place : null;
+
+    /// <summary>True when this torrent asks its peers for pieces in order rather than rarest-first.</summary>
+    public bool IsSequential(TorrentManager manager) => SequentialFor(Key(manager));
+
+    /// <summary>
+    /// Turns piece-order downloading on or off. MonoTorrent only swaps a picker on a stopped torrent,
+    /// so a running one is stopped first and handed back to the queue, which starts it again.
+    /// </summary>
+    public async Task SetSequentialAsync(TorrentManager manager, bool? sequential)
+    {
+        var key = Key(manager);
+        _preferences.Update(key, e => e.Sequential = sequential);
+        _preferences.Save();
+
+        if (SequentialFor(key) == _appliedSequential.GetValueOrDefault(key))
+        {
+            await ReconcileAsync();
+            return;
+        }
+
+        if (manager.State != TorrentState.Stopped) await SafeStopAsync(manager);
+        await ApplyPickerAsync(manager);
+        await ReconcileAsync();
+    }
+
+    /// <summary>Caps this torrent alone, in KiB/s. Null lifts the per-torrent cap and leaves only the global one.</summary>
+    public async Task SetRateLimitsAsync(TorrentManager manager, int? downloadKiB, int? uploadKiB)
+    {
+        var key = Key(manager);
+        _preferences.Update(key, e =>
+        {
+            e.MaxDownloadRateKiB = downloadKiB is null ? null : Math.Max(0, downloadKiB.Value);
+            e.MaxUploadRateKiB = uploadKiB is null ? null : Math.Max(0, uploadKiB.Value);
+        });
+        _preferences.Save();
+
+        await manager.UpdateSettingsAsync(BuildTorrentSettings(key));
+    }
+
+    /// <summary>Overrides the global seeding limits for this torrent. Null on both follows the globals again.</summary>
+    public async Task SetSeedLimitAsync(TorrentManager manager, double? ratio, int? minutes)
+    {
+        var key = Key(manager);
+        _preferences.Update(key, e =>
+        {
+            e.SeedRatioLimit = ratio is null ? null : Math.Max(0, ratio.Value);
+            e.SeedTimeLimitMinutes = minutes is null ? null : Math.Max(0, minutes.Value);
+
+            // A limit the user just widened should let the torrent seed again.
+            e.SeedLimitReached = false;
+        });
+        _seedLimitWaived.Remove(key);
+        _preferences.Save();
+
+        await ReconcileAsync();
+    }
+
+    /// <summary>Puts this torrent ahead of everything else waiting for a slot.</summary>
+    public async Task MoveToTopOfQueueAsync(TorrentManager manager)
+    {
+        _preferences.MoveToTop(Key(manager));
+        _preferences.Save();
+        await ReconcileAsync();
+    }
+
+    /// <summary>Puts this torrent behind everything else waiting for a slot.</summary>
+    public async Task MoveToBottomOfQueueAsync(TorrentManager manager)
+    {
+        _preferences.MoveToBottom(Key(manager));
+        _preferences.Save();
+        await ReconcileAsync();
+    }
+
+    // ----- Reconciliation ------------------------------------------------------------------------------------------
+
+    /// <summary>Asks for a reconcile without waiting for it. Safe to call from anywhere, including timers.</summary>
+    private void RequestReconcile() => _ = ReconcileAsync();
+
+    /// <summary>
+    /// Works out which torrents should be running and moves the engine to that set. Only one runs at a
+    /// time; anything asked for while one is in flight is folded into a single follow-up pass.
+    /// </summary>
+    private async Task ReconcileAsync()
+    {
+        Interlocked.Exchange(ref _reconcilePending, 1);
+
+        // Someone else holds the lock; they will see the flag we just set and run again for us.
+        if (!await _reconcileLock.WaitAsync(0)) return;
+
+        try
+        {
+            while (Interlocked.Exchange(ref _reconcilePending, 0) == 1)
+                await ReconcileOnceAsync();
+        }
+        catch (Exception ex)
+        {
+            EngineError?.Invoke(this, $"Could not apply the queue: {ex.Message}");
+        }
+        finally
+        {
+            _reconcileLock.Release();
+        }
+    }
+
+    private async Task ReconcileOnceAsync()
+    {
+        if (_engine is null || _shuttingDown) return;
+
+        var settings = _settings.Current;
+        var torrents = _engine.Torrents.ToList();
+
+        SampleTotals(torrents);
+        await EnforceSeedLimitsAsync(torrents, settings);
+
+        var suspended = _networkSuspended;
+        var plan = suspended
+            ? QueuePlan.Empty
+            : TorrentQueue.Plan(
+                // An errored torrent is left out rather than queued: nothing here will start it, and a
+                // slot handed to something that never runs is a slot no other torrent can have.
+                torrents.Where(m => m.State != TorrentState.Error && WantsToRun(Key(m)))
+                        .Select(m => new QueueCandidate(Key(m), m.Complete, _preferences.Get(Key(m)).QueueOrder)),
+                settings.MaxActiveDownloads,
+                settings.MaxActiveSeeds);
+
+        _waiting = plan.Waiting;
+
+        foreach (var manager in torrents)
+        {
+            if (_shuttingDown) return;
+
+            if (plan.Running.Contains(Key(manager)))
+            {
+                // Error is deliberately not in here: restarting a failing torrent every two seconds
+                // would spin forever. Pressing Start clears the error and brings it back.
+                if (manager.State is TorrentState.Stopped or TorrentState.Paused)
+                {
+                    await ApplyPickerAsync(manager);
+                    await SafeStartAsync(manager);
+                }
+            }
+            else if (ShouldStop(manager.State, suspended))
+            {
+                await SafeStopAsync(manager);
+            }
+        }
+
+        if (DateTime.UtcNow - _lastPreferenceSave > PreferenceSaveInterval)
+        {
+            _lastPreferenceSave = DateTime.UtcNow;
+            _preferences.Save();
+        }
+    }
+
+    /// <summary>A torrent nobody has paused and nothing has finished with is owed a place in the queue.</summary>
+    private bool WantsToRun(string key)
+    {
+        var overrides = _preferences.Get(key);
+        return !overrides.PausedByUser && !overrides.SeedLimitReached;
+    }
+
+    /// <summary>
+    /// Whether a torrent that may not run needs stopping. Hash checks are local work that leaks nothing,
+    /// so the queue leaves them alone; the kill switch, which is about the network being wrong rather
+    /// than busy, stops those too.
+    /// </summary>
+    private static bool ShouldStop(TorrentState state, bool networkSuspended) => state switch
+    {
+        TorrentState.Downloading or TorrentState.Seeding or TorrentState.Metadata
+            or TorrentState.Starting or TorrentState.FetchingHashes => true,
+        TorrentState.Hashing or TorrentState.HashingPaused => networkSuspended,
+        _ => false,
+    };
+
+    /// <summary>
+    /// Rolls each torrent's session counters into the totals we keep for it. The engine's counters start
+    /// again from zero every session, so the running totals - and the ratio measured from them - have to
+    /// be ours.
+    /// </summary>
+    private void SampleTotals(IReadOnlyList<TorrentManager> torrents)
+    {
+        var now = DateTime.UtcNow;
+        var elapsed = _lastSample == default ? TimeSpan.Zero : now - _lastSample;
+        _lastSample = now;
+
+        // A machine that was asleep comes back with hours on the clock and no seeding done in them.
+        if (elapsed > ReconcileInterval * 2) elapsed = ReconcileInterval;
+
+        foreach (var manager in torrents)
+        {
+            var key = Key(manager);
+            var received = manager.Monitor.DataBytesReceived;
+            var sent = manager.Monitor.DataBytesSent;
+            var seen = _lastCounters.GetValueOrDefault(key);
+            _lastCounters[key] = (received, sent);
+
+            // A counter that went backwards was reset with the session, so everything on it is new.
+            var down = received >= seen.Received ? received - seen.Received : received;
+            var up = sent >= seen.Sent ? sent - seen.Sent : sent;
+            var seedingSeconds = manager.State == TorrentState.Seeding ? (long)elapsed.TotalSeconds : 0;
+
+            if (down == 0 && up == 0 && seedingSeconds == 0) continue;
+
+            _preferences.Update(key, e =>
+            {
+                e.TotalDownloaded += down;
+                e.TotalUploaded += up;
+                e.SecondsSeeded += seedingSeconds;
+            });
+        }
+    }
+
+    /// <summary>Stops any torrent that has now given back everything its limits asked of it.</summary>
+    private async Task EnforceSeedLimitsAsync(IReadOnlyList<TorrentManager> torrents, AppSettings settings)
+    {
+        foreach (var manager in torrents)
+        {
+            if (!manager.Complete) continue;
+
+            var key = Key(manager);
+            if (_seedLimitWaived.Contains(key)) continue;
+
+            var overrides = _preferences.Get(key);
+            var limit = SeedLimit.For(settings, overrides);
+            var reached = !limit.IsUnlimited
+                && limit.IsReached(RatioOf(manager), TimeSpan.FromSeconds(overrides.SecondsSeeded));
+
+            if (overrides.SeedLimitReached)
+            {
+                // Raising the limit - here or in Settings - puts the torrent back in the queue. This is
+                // the only place the flag is cleared without the user asking, and re-deriving it is why.
+                if (!reached)
+                {
+                    _preferences.Update(key, e => e.SeedLimitReached = false);
+                    _preferences.Save();
+                }
+
+                continue;
+            }
+
+            if (!reached) continue;
+
+            _preferences.Update(key, e => e.SeedLimitReached = true);
+            _preferences.Save();
+            await SafeStopAsync(manager);
+            SeedLimitReached?.Invoke(this, manager);
+        }
+    }
+
+    /// <summary>
+    /// Gives a torrent the picker its mode calls for. MonoTorrent will only take one while the torrent
+    /// is stopped, which is exactly where the reconcile calls this from.
+    /// </summary>
+    private async Task ApplyPickerAsync(TorrentManager manager)
+    {
+        var key = Key(manager);
+        var sequential = SequentialFor(key);
+        if (_appliedSequential.TryGetValue(key, out var applied) && applied == sequential) return;
+        if (manager.State != TorrentState.Stopped) return;
+
+        try
+        {
+            await manager.ChangePickerAsync(new StandardPieceRequester(
+                sequential ? LinearPicking : PieceRequesterSettings.Default));
+
+            _appliedSequential[key] = sequential;
+        }
+        catch (Exception ex)
+        {
+            EngineError?.Invoke(this, $"Could not change how \"{manager.Name}\" picks pieces: {ex.Message}");
+        }
+    }
 
     public async Task SaveStateAsync()
     {
@@ -241,6 +618,27 @@ public sealed class TorrentService : IAsyncDisposable
         if (_engine is null || _shuttingDown) return;
         _shuttingDown = true;
 
+        if (_reconcileTimer is not null) await _reconcileTimer.DisposeAsync();
+        _reconcileTimer = null;
+
+        // Wait for any reconcile still in flight: it samples the same counters we are about to, and
+        // two threads walking those dictionaries is how a clean exit turns into a crash on the way out.
+        await _reconcileLock.WaitAsync();
+        try
+        {
+            SampleTotals(_engine.Torrents.ToList());
+        }
+        catch
+        {
+            // A last sample is a nicety; never let it stand between the user and a clean exit.
+        }
+        finally
+        {
+            _reconcileLock.Release();
+        }
+
+        _preferences.Save(force: true);
+
         try
         {
             await SaveStateAsync();
@@ -262,7 +660,7 @@ public sealed class TorrentService : IAsyncDisposable
 
     /// <summary>
     /// The kill switch. The bound interface going away stops every torrent that was running and, when
-    /// it returns, starts exactly those again - not the ones the user paused themselves.
+    /// it returns, hands them back to the queue - never to the torrents the user paused themselves.
     /// </summary>
     private async Task OnBindingChangedAsync(NetworkBindingState state)
     {
@@ -272,10 +670,14 @@ public sealed class TorrentService : IAsyncDisposable
         try
         {
             if (_shuttingDown) return;
+            if (state.IsAvailable == !_networkSuspended) return;
 
             if (!state.IsAvailable)
             {
-                await SuspendForNetworkAsync();
+                _networkSuspended = true;
+                NetworkSuspendedChanged?.Invoke(this, true);
+
+                await ReconcileAsync();
                 // Re-applying settings now drops the listeners, since there is no address to listen on.
                 await ApplySettingsAsync();
             }
@@ -283,7 +685,10 @@ public sealed class TorrentService : IAsyncDisposable
             {
                 // Rebind to the new address first, so the torrents we start are already on the tunnel.
                 await ApplySettingsAsync();
-                await ResumeAfterNetworkAsync();
+
+                _networkSuspended = false;
+                NetworkSuspendedChanged?.Invoke(this, false);
+                await ReconcileAsync();
             }
         }
         catch (Exception ex)
@@ -296,59 +701,17 @@ public sealed class TorrentService : IAsyncDisposable
         }
     }
 
-    private async Task SuspendForNetworkAsync()
-    {
-        if (!_activation.Suspend()) return;
-
-        NetworkSuspendedChanged?.Invoke(this, true);
-        if (_engine is null) return;
-
-        foreach (var manager in _engine.Torrents.ToList())
-        {
-            var key = Key(manager);
-            if (_activation.IsPausedByUser(key)) continue;
-
-            _activation.Defer(key);
-            if (manager.State is TorrentState.Stopped or TorrentState.Stopping) continue;
-
-            try
-            {
-                await manager.StopAsync(TimeSpan.FromSeconds(5));
-            }
-            catch
-            {
-                // Already on the way down, or the engine is shutting down: nothing to recover from.
-            }
-        }
-    }
-
-    private async Task ResumeAfterNetworkAsync()
-    {
-        if (!_activation.IsSuspended) return;
-
-        var owed = _activation.Resume();
-        NetworkSuspendedChanged?.Invoke(this, false);
-        if (_engine is null) return;
-
-        var wanted = owed.ToHashSet(StringComparer.OrdinalIgnoreCase);
-        foreach (var manager in _engine.Torrents.ToList())
-        {
-            if (wanted.Contains(Key(manager)))
-                await SafeStartAsync(manager);
-        }
-    }
-
     private async Task ApplySettingsAsync()
     {
         if (_engine is null) return;
         try
         {
             await _engine.UpdateSettingsAsync(BuildEngineSettings(_settings.Current));
-            var torrentSettings = BuildTorrentSettings();
             foreach (var manager in _engine.Torrents)
-                await manager.UpdateSettingsAsync(torrentSettings);
+                await manager.UpdateSettingsAsync(BuildTorrentSettings(Key(manager)));
 
             await RestartIfRouteChangedAsync();
+            await ReconcileAsync();
         }
         catch (Exception ex)
         {
@@ -362,7 +725,7 @@ public sealed class TorrentService : IAsyncDisposable
     /// <summary>
     /// Turning a proxy on doesn't do much for connections that are already open - they keep running
     /// along the old path, from the address the proxy was meant to replace. So when the route changes,
-    /// the torrents are cycled and every connection is made again the new way.
+    /// the running torrents are stopped and the queue starts them again the new way.
     /// </summary>
     private async Task RestartIfRouteChangedAsync()
     {
@@ -370,22 +733,14 @@ public sealed class TorrentService : IAsyncDisposable
         if (route == _appliedRoute) return;
 
         _appliedRoute = route;
-        if (_engine is null || _activation.IsSuspended) return;
+        if (_engine is null || _networkSuspended) return;
 
         foreach (var manager in _engine.Torrents.ToList())
         {
-            if (_activation.IsPausedByUser(Key(manager))) continue;
+            if (!WantsToRun(Key(manager))) continue;
             if (manager.State is TorrentState.Stopped or TorrentState.Stopping) continue;
 
-            try
-            {
-                await manager.StopAsync(TimeSpan.FromSeconds(5));
-                await manager.StartAsync();
-            }
-            catch (Exception ex)
-            {
-                EngineError?.Invoke(this, $"Could not restart \"{manager.Name}\" on the new route: {ex.Message}");
-            }
+            await SafeStopAsync(manager);
         }
     }
 
@@ -452,14 +807,39 @@ public sealed class TorrentService : IAsyncDisposable
         }
     }
 
-    private void HookManager(TorrentManager manager)
+    /// <summary>Starts remembering a torrent: queue position, picker baseline and the events we care about.</summary>
+    private void Track(TorrentManager manager)
     {
+        var key = Key(manager);
+        _preferences.EnsureTracked(key);
+
+        // Every manager comes out of the engine with the standard picker, restored ones included.
+        _appliedSequential[key] = false;
+
         manager.TorrentStateChanged += (_, e) =>
         {
-            // Persist when a torrent finishes so a crash doesn't lose the "complete" fast-resume.
             if (e.NewState == TorrentState.Seeding && e.OldState == TorrentState.Downloading)
+            {
+                // Persist when a torrent finishes so a crash doesn't lose the "complete" fast-resume.
                 _ = SaveStateAsync();
+                TorrentCompleted?.Invoke(this, manager);
+            }
+            else if (e.NewState == TorrentState.Error)
+            {
+                TorrentFailed?.Invoke(this, manager);
+            }
+
+            // A torrent that finished downloading has just given up a download slot.
+            RequestReconcile();
         };
+    }
+
+    private void Forget(string key)
+    {
+        _preferences.Forget(key);
+        _appliedSequential.Remove(key);
+        _lastCounters.Remove(key);
+        _seedLimitWaived.Remove(key);
     }
 
     private async Task SafeStartAsync(TorrentManager manager)
@@ -475,9 +855,38 @@ public sealed class TorrentService : IAsyncDisposable
         }
     }
 
+    private static async Task SafeStopAsync(TorrentManager manager)
+    {
+        try
+        {
+            await manager.StopAsync(TimeSpan.FromSeconds(5));
+        }
+        catch
+        {
+            // Already on the way down, or the engine is shutting down: nothing to recover from.
+        }
+    }
+
     /// <summary>Wraps a UDP tracker so it stops announcing the moment a proxy is configured.</summary>
     private ITrackerConnection BlockedWhileProxied(ITrackerConnection connection)
         => new ProxyBlockedTrackerConnection(connection, () => ProxyConfiguration.From(_settings.Current).IsEnabled);
+
+    private bool SequentialFor(string key) =>
+        _preferences.Get(key).Sequential ?? _settings.Current.SequentialDownload;
+
+    private SeedLimit SeedLimitFor(string key) =>
+        SeedLimit.For(_settings.Current, _preferences.Get(key));
+
+    private TimeSpan SeededFor(string key) =>
+        TimeSpan.FromSeconds(_preferences.Get(key).SecondsSeeded);
+
+    private double RatioOf(TorrentManager manager)
+    {
+        var overrides = _preferences.Get(Key(manager));
+        var size = manager.Torrent?.Size ?? manager.MagnetLink.Size ?? 0;
+        var onDisk = (long)(size * manager.Progress / 100);
+        return ShareRatio.Of(overrides.TotalUploaded, overrides.TotalDownloaded, onDisk);
+    }
 
     private EngineSettings BuildEngineSettings(AppSettings s)
     {
@@ -526,38 +935,19 @@ public sealed class TorrentService : IAsyncDisposable
         return builder.ToSettings();
     }
 
-    private TorrentSettings BuildTorrentSettings() => new TorrentSettingsBuilder
+    private TorrentSettings BuildTorrentSettings(string key)
     {
-        AllowDht = _settings.Current.EnableDht,
-        AllowPeerExchange = _settings.Current.EnablePex,
-    }.ToSettings();
+        var overrides = _preferences.Get(key);
+        return new TorrentSettingsBuilder
+        {
+            AllowDht = _settings.Current.EnableDht,
+            AllowPeerExchange = _settings.Current.EnablePex,
+
+            // 0 is MonoTorrent's "no cap", which is also what an absent override means.
+            MaximumDownloadRate = Math.Max(0, overrides.MaxDownloadRateKiB ?? 0) * 1024,
+            MaximumUploadRate = Math.Max(0, overrides.MaxUploadRateKiB ?? 0) * 1024,
+        }.ToSettings();
+    }
 
     private static string Key(TorrentManager manager) => manager.InfoHashes.V1OrV2.ToHex();
-
-    private void LoadPausedSet()
-    {
-        try
-        {
-            if (!File.Exists(PausedStatePath)) return;
-            var items = JsonSerializer.Deserialize<string[]>(File.ReadAllText(PausedStatePath));
-            if (items is null) return;
-            _activation.LoadPaused(items);
-        }
-        catch
-        {
-            // Ignore - worst case everything auto-starts.
-        }
-    }
-
-    private void SavePausedSet()
-    {
-        try
-        {
-            File.WriteAllText(PausedStatePath, JsonSerializer.Serialize(_activation.PausedByUser.ToArray()));
-        }
-        catch
-        {
-            // Non-fatal.
-        }
-    }
 }
