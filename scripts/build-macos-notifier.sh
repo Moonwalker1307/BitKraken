@@ -14,19 +14,29 @@ BUNDLE_ID="${2:?bundle id required}"
 DISPLAY_NAME="${3:?display name required}"
 ICNS="${4:-}"
 
+# The icon's base name inside the bundle, which CFBundleIconFile is pointed at.
+ICON_NAME="BitKraken"
+
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
 rm -rf "$DEST"
 mkdir -p "$(dirname "$DEST")"
 osacompile -o "$DEST" "$ROOT/packaging/macos/notifier.applescript"
 
-# The applet ships with a generic icon; ours replaces it, under the name osacompile wrote into the
-# Info.plist. This is the entire point of the bundle existing.
+# The applet ships with a generic icon; ours replaces it. This is the entire point of the bundle
+# existing, so the name is stated here rather than inherited from whatever osacompile wrote.
+PLIST="$DEST/Contents/Info.plist"
 if [ -n "$ICNS" ]; then
-  cp "$ICNS" "$DEST/Contents/Resources/applet.icns"
+  cp "$ICNS" "$DEST/Contents/Resources/$ICON_NAME.icns"
+  plutil -replace CFBundleIconFile -string "$ICON_NAME" "$PLIST" 2>/dev/null \
+    || plutil -insert CFBundleIconFile -string "$ICON_NAME" "$PLIST"
+
+  # osacompile's own icon, left behind under its own name, is what shows if anything here is wrong.
+  # Removing it turns "the logo silently did not apply" into a bundle with no icon at all, which is
+  # a symptom somebody notices.
+  [ "$ICON_NAME" = "applet" ] || rm -f "$DEST/Contents/Resources/applet.icns"
 fi
 
-PLIST="$DEST/Contents/Info.plist"
 plutil -replace CFBundleIdentifier -string "$BUNDLE_ID" "$PLIST"
 
 # Both names: a notification is headed by CFBundleDisplayName when there is one, CFBundleName when

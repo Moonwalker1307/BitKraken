@@ -166,8 +166,13 @@ as "BitKraken", since that is the name and icon it carries.
 
 Which bundle posted a notification is not something a Linux test run can see, so
 [`scripts/verify-macos-notifier.sh`](scripts/verify-macos-notifier.sh) runs on a macOS runner in CI: it builds
-the helper, posts a notification through it, and fails the build unless the helper's own bundle is what posted
-it and macOS accepted it. The icon itself still needs eyes.
+the helper, checks that the icon in it really is BitKraken's rather than the generic one `osacompile` ships,
+posts a notification through it, and fails the build unless the helper's own bundle is what posted it and
+macOS accepted it. What the icon looks like once drawn still needs eyes.
+
+One thing to know when testing a change to this: macOS caches an app's icon against its bundle id, so a Mac
+that has already seen a build of the helper may keep showing the icon it saw first. Deleting the old
+`BitKraken.app` before installing the new one avoids chasing a cache instead of a bug.
 
 ## Watch folder
 
