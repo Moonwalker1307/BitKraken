@@ -92,6 +92,20 @@ The macOS verification scripts (`verify-macos-app.sh`, `verify-macos-notifier.sh
 runners. Changes to the bundle, the helper or notifications can't be validated locally on Linux; lean
 on CI and say so rather than claiming a check that did not run.
 
+## Branches and pull requests
+
+Every change starts on a **new** branch cut from the latest `origin/main`. Never add commits to a
+branch whose pull request has already merged, even when a session began with that branch assigned to
+it: a merged pull request cannot track new work, and stacking on merged history makes the new diff
+read as though it re-lands commits that are already in. Start again instead, keeping any unmerged
+work:
+
+```bash
+git fetch origin main && git checkout -B claude/<new-name> origin/main
+```
+
+Merging to `main` tags and publishes a release, so `main` is not somewhere to try something out.
+
 ## Conventions
 
 - **Commits**: an imperative, sentence-case subject naming the behaviour change — "Stop the queue
