@@ -85,8 +85,10 @@ Versions are derived, never written down. Don't hand-edit `<Version>` in `BitKra
 `scripts/next-version.sh` reads the highest `v1.0.*` tag and adds one. A merge to `main` releases
 `1.0.x` and tags it; a pull request builds `1.0.x-preview-<run>` as artifacts only.
 
-The installers workflow only builds when `src/` changes, so a docs- or scripts-only merge releases
-nothing — that is deliberate, not a bug to fix.
+The `src/` filter on the installers workflow applies to pushes to `main` only, so a docs-, scripts- or
+packaging-only merge builds nothing and releases nothing — deliberate, not a bug to fix. Pull requests,
+tag pushes and manual dispatches are never filtered: they always build all five platforms, which is why
+a one-file docs PR still spends ten minutes packaging installers.
 
 The macOS verification scripts (`verify-macos-app.sh`, `verify-macos-notifier.sh`) only run on macOS
 runners. Changes to the bundle, the helper or notifications can't be validated locally on Linux; lean
