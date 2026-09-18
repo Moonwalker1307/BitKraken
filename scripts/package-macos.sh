@@ -18,6 +18,9 @@ VERSION="${VERSION#v}"
 VERSION_CORE="${VERSION%%-*}"
 APP_NAME="BitKraken"
 BUNDLE_ID="com.thorstholm.bitkraken"
+# Where BitKraken looks for the helper: DesktopNotifier builds this same path off its own
+# executable, and a pinning test fails if only one of the two is ever changed.
+NOTIFIER_APP="$APP_NAME Notifier.app"
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 OUT="$ROOT/publish/$RID"
@@ -38,15 +41,17 @@ cp -R "$OUT"/. "$APP/Contents/MacOS/"
 sed "s/__VERSION__/$VERSION_CORE/g" "$ROOT/packaging/macos/Info.plist" > "$APP/Contents/Info.plist"
 echo -n "APPL????" > "$APP/Contents/PkgInfo"
 
-# Icon: build an .icns from the 512px PNG
-ICONSET="$STAGE/$APP_NAME.iconset"
-mkdir -p "$ICONSET"
-for size in 16 32 128 256 512; do
-  sips -z $size $size "$ROOT/src/BitKraken/Assets/bitkraken.png" --out "$ICONSET/icon_${size}x${size}.png" >/dev/null
-  double=$((size * 2))
-  sips -z $double $double "$ROOT/src/BitKraken/Assets/bitkraken.png" --out "$ICONSET/icon_${size}x${size}@2x.png" >/dev/null
-done
-iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/$APP_NAME.icns"
+# Icon: build an .icns from the 512px PNG. The helper below is given the same file.
+"$ROOT/scripts/build-macos-icns.sh" "$APP/Contents/Resources/$APP_NAME.icns"
+
+# A notification wears the icon of the bundle that posted it, and osascript's bundle is Script
+# Editor's - which is why notifications never carried the logo however the image was passed. This
+# applet exists only to be a bundle with BitKraken's icon: BitKraken runs it, the notification is
+# posted from inside it, and the right face comes with it. Built before signing, so --deep covers it.
+echo "==> Building the notification helper"
+NOTIFIER="$APP/Contents/Helpers/$NOTIFIER_APP"
+"$ROOT/scripts/build-macos-notifier.sh" \
+  "$NOTIFIER" "$BUNDLE_ID.notifier" "$APP_NAME" "$APP/Contents/Resources/$APP_NAME.icns"
 
 echo "==> Signing"
 if [ -n "${SIGNING_IDENTITY:-}" ]; then

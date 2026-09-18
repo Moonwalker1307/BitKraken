@@ -124,16 +124,55 @@ Notifications use whatever the desktop already provides, rather than BitKraken t
 
 | Platform | How |
 | --- | --- |
-| macOS | `osascript`, which hands it to Notification Center |
+| macOS | `osascript`, which hands it to Notification Center — posted as the helper bundle below, so it carries the logo |
 | Linux | `notify-send` — the freedesktop.org standard, present on most desktops |
 | Windows | a toast raised through PowerShell's WinRT bridge, so it is attributed to "Windows PowerShell" rather than to BitKraken, which would need its own registered AppUserModelID |
 
-The Linux and Windows notifications carry the BitKraken logo, which is unpacked out of the binary into the
-cache directory the first time one is shown, since a notification daemon can only be handed a path. macOS
-cannot: `display notification` always shows the icon of the process that raised the event — osascript's.
+All three carry the BitKraken logo, by two different routes. Linux and Windows take an image, so they are
+handed the logo unpacked out of the binary into the cache directory the first time one is shown — a
+notification daemon can only be given a path. macOS takes no image at all: it shows the icon of the bundle
+that posted the notification, which for `osascript` is Script Editor's. So there it is not the image that
+changes but the poster, which is what the helper below is for.
 
 All three are best-effort: a machine without the tool gets nothing, and the in-app toast is always shown as
 well, so nothing is ever only said out here.
+
+### The macOS notification helper
+
+macOS shows the icon of whichever *bundle* posted a notification, and there is no way to override it — which
+is why a plain `osascript` notification arrives as Script Editor, whatever image you hand it. So the `.app`
+carries a second, tiny bundle at `Contents/Helpers/BitKraken Notifier.app`: an AppleScript applet whose only
+job is to own BitKraken's icon and post notifications from inside it.
+
+BitKraken **runs** the helper; it does not ask it to post anything. The difference is the whole fix. Telling
+the bundle to post one from outside — `tell application id "…" to display notification` — looks equivalent and
+needs three things to be true that nobody tells you about: LaunchServices has to resolve a bundle id nested in
+`Contents/Helpers`, an applet has to answer an Apple event it has no handler for, and the user has to have
+granted BitKraken automation access. When any of them does not hold, the event fails silently and the
+notification falls back to the plain command — arriving, once again, as Script Editor. That is what shipped in
+`1.0.6-preview-25` and why it looked exactly like no fix at all. Running the applet needs none of the three.
+
+The title and body reach the applet as environment variables, never as script source, so a torrent whose name
+is full of quotes is still just a name.
+
+It is built by [`scripts/build-macos-notifier.sh`](scripts/build-macos-notifier.sh), from
+[`packaging/macos/notifier.applescript`](packaging/macos/notifier.applescript), and signed with the app. A
+build running outside the bundle — straight off `dotnet run` — has no helper, so the notification is posted the
+plain way and looks the way it always did.
+
+Two things follow from the notification being a different bundle. It asks for notification permission under
+its own name the first time it posts, and it appears on its own line in **System Settings → Notifications** —
+as "BitKraken", since that is the name and icon it carries.
+
+Which bundle posted a notification is not something a Linux test run can see, so
+[`scripts/verify-macos-notifier.sh`](scripts/verify-macos-notifier.sh) runs on a macOS runner in CI: it builds
+the helper, checks that the icon in it really is BitKraken's rather than the generic one `osacompile` ships,
+posts a notification through it, and fails the build unless the helper's own bundle is what posted it and
+macOS accepted it. What the icon looks like once drawn still needs eyes.
+
+One thing to know when testing a change to this: macOS caches an app's icon against its bundle id, so a Mac
+that has already seen a build of the helper may keep showing the icon it saw first. Deleting the old
+`BitKraken.app` before installing the new one avoids chasing a cache instead of a bug.
 
 ## Watch folder
 
@@ -269,7 +308,7 @@ Everything lands in `dist/`:
 The [installers workflow](.github/workflows/installers.yml) builds all five in parallel on macOS, Windows and Linux
 runners:
 
-- **Pull request** → builds a **preview**, `1.0.x-preview`, and uploads every platform's packages as workflow artifacts.
+- **Pull request** → builds a **preview**, `1.0.x-preview-<run>`, and uploads every platform's packages as workflow artifacts.
 - **Merge to `main`** → builds `1.0.x`, tags the commit `v1.0.x` and publishes a GitHub **release** with all the
   packages attached, so it shows up under *Releases*. Only pushes that touch [`src/`](src) build: a merge that
   changes nothing but docs, scripts or packaging is skipped and releases nothing.
@@ -285,9 +324,15 @@ computes it and can be run locally:
 
 ```bash
 scripts/next-version.sh release   # 1.0.3
-scripts/next-version.sh preview   # 1.0.3-preview
+scripts/next-version.sh preview   # 1.0.3-preview (1.0.3-preview-23 on a GitHub runner)
 scripts/next-version.sh current   # 1.0.2 (the latest released version)
 ```
+
+A preview also carries the workflow's run number — `1.0.3-preview-23`. Previews are never tagged, so
+without it every build of a pull request has the same name, and there is no telling from a file name, a
+title bar or a crash report which one someone is actually running. It comes from `GITHUB_RUN_NUMBER`,
+which only exists on a runner; locally the version stays `1.0.3-preview`. Releases never carry it —
+a release is tagged `v1.0.3`, and that tag is what the counter reads back.
 
 Releases are the source of truth for the counter, so nothing needs to be committed to bump a version. To move to a
 new series, push a tag for it (e.g. `v1.1.0`) or set `VERSION_SERIES=1.1`. Pre-release suffixes are kept in file

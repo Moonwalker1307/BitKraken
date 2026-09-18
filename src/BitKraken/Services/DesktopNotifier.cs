@@ -7,20 +7,39 @@ namespace BitKraken.Services;
 /// notification API, so each platform gets the tool it ships with rather than BitKraken taking on a
 /// dependency for it:
 /// <list type="bullet">
-///   <item><description>macOS - <c>osascript</c>, which hands it to Notification Center.</description></item>
+///   <item><description>macOS - the helper applet inside the bundle, which posts it so the logo shows.</description></item>
 ///   <item><description>Linux - <c>notify-send</c>, the freedesktop.org standard, present on most desktops.</description></item>
 ///   <item><description>Windows - a toast raised through PowerShell's WinRT bridge.</description></item>
 /// </list>
 /// Every path is best-effort: a desktop without the tool (a bare window manager, a locked-down box)
 /// gets nothing, and the in-app toast is always shown as well so nothing is only ever said out here.
-/// Linux and Windows are handed <see cref="AppIcon"/> so the notification carries the BitKraken logo.
-/// macOS cannot be: <c>display notification</c> always shows the icon of the process that raised the
-/// event, which is osascript's, and there is no way to override it short of shipping a signed helper.
+/// <para>
+/// All three carry the BitKraken logo, by two different routes. Linux and Windows are handed
+/// <see cref="AppIcon"/>, because their notifications take an image. macOS does not take one at all:
+/// it shows the icon of the bundle that posted the notification, which for <c>osascript</c> is Script
+/// Editor's. So the image is not what changes there, the poster is - see <see cref="NotifierExecutable"/>.
+/// </para>
 /// </summary>
 public static class DesktopNotifier
 {
     /// <summary>Long enough for a notification daemon to answer, short enough never to be noticed.</summary>
     private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(10);
+
+    /// <summary>
+    /// The helper bundle inside BitKraken.app that exists only to put a face on a notification.
+    /// Built by scripts/build-macos-notifier.sh under this name; keep the two in step.
+    /// </summary>
+    internal const string NotifierBundleName = AppInfo.Name + " Notifier.app";
+
+    /// <summary>The environment BitKraken hands a notification tool, so no text of the user's is ever code.</summary>
+    private static Dictionary<string, string> NotifyEnvironment(string title, string body, string? icon = null) =>
+        new()
+        {
+            ["BITKRAKEN_NOTIFY_TITLE"] = title,
+            ["BITKRAKEN_NOTIFY_BODY"] = body,
+            // A toast reads its image as a URI, and an empty value tells the script there is none.
+            ["BITKRAKEN_NOTIFY_ICON"] = icon ?? "",
+        };
 
     /// <summary>
     /// Raises a toast through PowerShell. Title, body and icon path arrive as environment variables so
@@ -76,21 +95,29 @@ public static class DesktopNotifier
     {
         if (OperatingSystem.IsMacOS())
         {
-            // AppleScript is source, not arguments, so the two strings have to be escaped into it.
-            Run("osascript", ["-e", $"display notification \"{Escape(body)}\" with title \"{Escape(title)}\""], null);
+            // The helper posts the notification by running: it is a bundle carrying BitKraken's icon,
+            // and a notification wears the icon of whatever process posted it. Title and body go in
+            // its environment, so no torrent's name is ever read as script.
+            try
+            {
+                var helper = NotifierExecutable();
+                if (helper is not null && Run(helper, [], NotifyEnvironment(title, body))) return;
+            }
+            catch (Exception)
+            {
+                // Fall through to the plain command below.
+            }
+
+            // No helper: a build running outside the .app, straight off `dotnet run`. Script Editor's
+            // icon is a poor second, and still better than saying nothing.
+            Run("osascript", ["-e", AppleScript(title, body)], null);
         }
         else if (OperatingSystem.IsWindows())
         {
             Run(
                 "powershell.exe",
                 ["-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", WindowsToastScript],
-                new Dictionary<string, string>
-                {
-                    ["BITKRAKEN_NOTIFY_TITLE"] = title,
-                    ["BITKRAKEN_NOTIFY_BODY"] = body,
-                    // A toast reads its image as a URI, and an empty value tells the script there is none.
-                    ["BITKRAKEN_NOTIFY_ICON"] = ToastImageUri(AppIcon.FilePath),
-                });
+                NotifyEnvironment(title, body, ToastImageUri(AppIcon.FilePath)));
         }
         else
         {
@@ -110,10 +137,61 @@ public static class DesktopNotifier
         catch (UriFormatException) { return ""; }
     }
 
-    /// <summary>Escapes a string for embedding in an AppleScript double-quoted literal.</summary>
-    private static string Escape(string value) => value.Replace("\\", "\\\\").Replace("\"", "\\\"");
+    /// <summary>
+    /// The AppleScript that posts one notification the plain way, as osascript - which means wearing
+    /// Script Editor's icon, since macOS attributes a notification to the bundle that posted it. Only
+    /// reached when there is no helper bundle to run, which is why it is a fallback and not the path.
+    /// </summary>
+    /// <remarks>
+    /// Telling the helper to post it instead of running it looks like the same thing and is not: the
+    /// Apple event needs LaunchServices to resolve the bundle id, needs an applet to answer an event
+    /// it has no handler for, and needs the user to have granted BitKraken automation access. All
+    /// three have to hold, none of them announces itself when it does not, and the failure is a silent
+    /// fall back to this - a notification with the wrong icon, which is what was shipped and reported.
+    /// </remarks>
+    internal static string AppleScript(string title, string body) =>
+        // AppleScript is source, not arguments, so every string has to be escaped into it.
+        $"display notification \"{Escape(body)}\" with title \"{Escape(title)}\"";
 
-    private static void Run(string program, IEnumerable<string> arguments, IDictionary<string, string>? environment)
+    /// <summary>
+    /// The helper applet's executable inside BitKraken.app, or null when there is not one - a build
+    /// run outside the bundle. The app's own binaries live in <c>Contents/MacOS</c>, so the helper is
+    /// one directory up and over.
+    /// </summary>
+    internal static string? NotifierExecutable(string? baseDirectory = null)
+    {
+        try
+        {
+            var path = Path.GetFullPath(Path.Combine(
+                baseDirectory ?? AppContext.BaseDirectory,
+                "..", "Helpers", NotifierBundleName, "Contents", "MacOS", "applet"));
+
+            return File.Exists(path) ? path : null;
+        }
+        catch (Exception)
+        {
+            // A base directory that is not a path we can walk up out of. There is no helper, then.
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Escapes a string for embedding in an AppleScript double-quoted literal. The line breaks matter
+    /// as much as the quotes: AppleScript has no multi-line string literal, so a raw newline is a
+    /// syntax error, and a torrent that failed sends its name and the reason separated by one. That
+    /// made every failure notification on macOS a script that would not compile, and so no
+    /// notification at all.
+    /// </summary>
+    private static string Escape(string value) => value
+        .Replace("\\", "\\\\")
+        .Replace("\"", "\\\"")
+        .Replace("\r\n", "\\n")
+        .Replace("\n", "\\n")
+        .Replace("\r", "\\n")
+        .Replace("\t", "\\t");
+
+    /// <summary>Runs one notification tool. True only if it actually reported success.</summary>
+    private static bool Run(string program, IEnumerable<string> arguments, IDictionary<string, string>? environment)
     {
         var info = new ProcessStartInfo(program)
         {
@@ -130,13 +208,17 @@ public static class DesktopNotifier
         }
 
         using var process = Process.Start(info);
-        if (process is null) return;
+        if (process is null) return false;
 
         // Reap it so a desktop that never answers can't leave a process behind for the session.
         if (!process.WaitForExit(Timeout))
         {
             try { process.Kill(entireProcessTree: true); }
             catch { /* already gone */ }
+
+            return false;
         }
+
+        return process.ExitCode == 0;
     }
 }
