@@ -35,7 +35,7 @@ jobs:
       channel: ${{ steps.version.outputs.channel }}
       build: ${{ steps.changes.outputs.build }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0 # release tags drive the version counter
 
@@ -96,9 +96,9 @@ jobs:
     if: needs.version.outputs.build == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@v6
         with:
           global-json-file: global.json
 
@@ -110,7 +110,7 @@ jobs:
     name: macOS notification helper
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - run: scripts/verify-macos-notifier.sh
 
@@ -155,10 +155,10 @@ jobs:
       APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Set up .NET 10
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v6
         with:
           global-json-file: global.json
 
@@ -220,7 +220,7 @@ jobs:
           done
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: BitKraken-${{ needs.version.outputs.value }}-${{ matrix.rid }}
           path: |
@@ -240,14 +240,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Download every platform's packages
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: BitKraken-${{ needs.version.outputs.value }}-*
           path: dist
           merge-multiple: true
 
       - name: Publish release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: v${{ needs.version.outputs.value }}
           name: BitKraken ${{ needs.version.outputs.value }}
