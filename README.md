@@ -170,9 +170,22 @@ the helper, checks that the icon in it really is BitKraken's rather than the gen
 posts a notification through it, and fails the build unless the helper's own bundle is what posted it and
 macOS accepted it. What the icon looks like once drawn still needs eyes.
 
-One thing to know when testing a change to this: macOS caches an app's icon against its bundle id, so a Mac
-that has already seen a build of the helper may keep showing the icon it saw first. Deleting the old
-`BitKraken.app` before installing the new one avoids chasing a cache instead of a bug.
+That check builds a helper into a temp directory, which is not the artifact that ships: the real one is built
+in place, signed over by `codesign --deep`, and carried through a `.dmg` and a `.pkg`. So
+[`scripts/verify-macos-app.sh`](scripts/verify-macos-app.sh) checks the helper inside a finished
+`BitKraken.app` as well, and the macOS packaging job runs it on every build.
+
+It also runs against an installed copy, which is the thing to reach for when a notification turns up wearing
+the wrong face:
+
+```sh
+scripts/verify-macos-app.sh            # defaults to /Applications/BitKraken.app
+```
+
+It reports the helper's identity, its icon and whether that icon is the app's own, and says whether the
+problem is the bundle or the machine. macOS caches an app's icon against its bundle id, so a Mac that has
+already seen one build of the helper can keep showing the icon it saw first however correct the new bundle
+is; the script prints how to clear that if everything it can check comes back clean.
 
 ## Watch folder
 
