@@ -101,6 +101,21 @@ else
   note "lsregister not available here"
 fi
 
+# The route that matters now: BitKraken posting the notification itself, as this bundle. Only a process
+# actually inside the .app can answer whether that works, which is why the app carries the flag.
+echo "==> Posting one from the app itself"
+if [ -x "$APP/Contents/MacOS/$APP_NAME" ]; then
+  if report="$("$APP/Contents/MacOS/$APP_NAME" --notify-test "$APP_NAME" "verify-macos-app.sh" 2>&1)"; then
+    note "$report"
+    note "the notification is posted by this bundle, so it wears this bundle's icon"
+  else
+    note "$report"
+    bad "the app cannot post its own notifications here - it will fall back to the helper, which is what kept drawing the wrong icon"
+  fi
+else
+  bad "no $APP_NAME executable in Contents/MacOS"
+fi
+
 echo
 if [ "$problems" -gt 0 ]; then
   echo "$problems problem(s) with the helper in this bundle."

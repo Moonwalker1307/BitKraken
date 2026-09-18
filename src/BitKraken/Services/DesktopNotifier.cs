@@ -7,7 +7,7 @@ namespace BitKraken.Services;
 /// notification API, so each platform gets the tool it ships with rather than BitKraken taking on a
 /// dependency for it:
 /// <list type="bullet">
-///   <item><description>macOS - the helper applet inside the bundle, which posts it so the logo shows.</description></item>
+///   <item><description>macOS - AppKit, from this process, so the notification is BitKraken's own.</description></item>
 ///   <item><description>Linux - <c>notify-send</c>, the freedesktop.org standard, present on most desktops.</description></item>
 ///   <item><description>Windows - a toast raised through PowerShell's WinRT bridge.</description></item>
 /// </list>
@@ -17,7 +17,7 @@ namespace BitKraken.Services;
 /// All three carry the BitKraken logo, by two different routes. Linux and Windows are handed
 /// <see cref="AppIcon"/>, because their notifications take an image. macOS does not take one at all:
 /// it shows the icon of the bundle that posted the notification, which for <c>osascript</c> is Script
-/// Editor's. So the image is not what changes there, the poster is - see <see cref="NotifierExecutable"/>.
+/// Editor's. So the image is not what changes there, the poster is - see <see cref="MacNotifications"/>.
 /// </para>
 /// </summary>
 public static class DesktopNotifier
@@ -109,9 +109,15 @@ public static class DesktopNotifier
     {
         if (OperatingSystem.IsMacOS())
         {
-            // The helper posts the notification by running: it is a bundle carrying BitKraken's icon,
-            // and a notification wears the icon of whatever process posted it. Title and body go in
-            // its environment, so no torrent's name is ever read as script.
+            // Posted from this process, which is BitKraken.app - so the icon macOS puts on it is
+            // BitKraken.app's, the one already on the Dock. Nothing else here can say that: a
+            // notification wears the icon of the bundle that posted it, and every other route posts
+            // from somewhere else.
+            if (MacNotifications.TryPost(title, body)) return;
+
+            // Behind it, the helper applet. Its bundle carries the right icon too, but it is nested
+            // inside Contents/Helpers where LaunchServices does not reliably register it, which is why
+            // it kept drawing the generic applet icon. Kept because it still beats Script Editor's.
             try
             {
                 var helper = NotifierExecutable();
