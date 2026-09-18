@@ -7,7 +7,7 @@ namespace BitKraken.Services;
 /// notification API, so each platform gets the tool it ships with rather than BitKraken taking on a
 /// dependency for it:
 /// <list type="bullet">
-///   <item><description>macOS - the helper applet inside the bundle, which posts it so the logo shows.</description></item>
+///   <item><description>macOS - AppKit, from this process, so the notification is BitKraken's own.</description></item>
 ///   <item><description>Linux - <c>notify-send</c>, the freedesktop.org standard, present on most desktops.</description></item>
 ///   <item><description>Windows - a toast raised through PowerShell's WinRT bridge.</description></item>
 /// </list>
@@ -17,7 +17,7 @@ namespace BitKraken.Services;
 /// All three carry the BitKraken logo, by two different routes. Linux and Windows are handed
 /// <see cref="AppIcon"/>, because their notifications take an image. macOS does not take one at all:
 /// it shows the icon of the bundle that posted the notification, which for <c>osascript</c> is Script
-/// Editor's. So the image is not what changes there, the poster is - see <see cref="NotifierExecutable"/>.
+/// Editor's. So the image is not what changes there, the poster is - see <see cref="MacNotifications"/>.
 /// </para>
 /// </summary>
 public static class DesktopNotifier
@@ -30,6 +30,20 @@ public static class DesktopNotifier
     /// Built by scripts/build-macos-notifier.sh under this name; keep the two in step.
     /// </summary>
     internal const string NotifierBundleName = AppInfo.Name + " Notifier.app";
+
+    /// <summary>
+    /// LaunchServices' record of a bundle is where macOS gets the name and icon it draws on a
+    /// notification, and it keeps the first one it saw. The helper shipped twice wearing osacompile's
+    /// generic icon before it carried BitKraken's, so on any Mac that ran those builds the stale record
+    /// is what shows - however right the bundle on disk now is, which is the state this was left in.
+    /// Re-registering costs one short-lived subprocess, once per run, and spares anyone having to go
+    /// deleting icon caches by hand.
+    /// </summary>
+    private const string LaunchServicesRegister =
+        "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister";
+
+    /// <summary>Set once the helper has been re-registered, so it happens on the first notification only.</summary>
+    private static int _helperRegistered;
 
     /// <summary>The environment BitKraken hands a notification tool, so no text of the user's is ever code.</summary>
     private static Dictionary<string, string> NotifyEnvironment(string title, string body, string? icon = null) =>
@@ -95,13 +109,23 @@ public static class DesktopNotifier
     {
         if (OperatingSystem.IsMacOS())
         {
-            // The helper posts the notification by running: it is a bundle carrying BitKraken's icon,
-            // and a notification wears the icon of whatever process posted it. Title and body go in
-            // its environment, so no torrent's name is ever read as script.
+            // Posted from this process, which is BitKraken.app - so the icon macOS puts on it is
+            // BitKraken.app's, the one already on the Dock. Nothing else here can say that: a
+            // notification wears the icon of the bundle that posted it, and every other route posts
+            // from somewhere else.
+            if (MacNotifications.TryPost(title, body)) return;
+
+            // Behind it, the helper applet. Its bundle carries the right icon too, but it is nested
+            // inside Contents/Helpers where LaunchServices does not reliably register it, which is why
+            // it kept drawing the generic applet icon. Kept because it still beats Script Editor's.
             try
             {
                 var helper = NotifierExecutable();
-                if (helper is not null && Run(helper, [], NotifyEnvironment(title, body))) return;
+                if (helper is not null)
+                {
+                    RefreshHelperRegistration(helper);
+                    if (Run(helper, [], NotifyEnvironment(title, body))) return;
+                }
             }
             catch (Exception)
             {
@@ -189,6 +213,34 @@ public static class DesktopNotifier
         .Replace("\n", "\\n")
         .Replace("\r", "\\n")
         .Replace("\t", "\\t");
+
+    /// <summary>
+    /// The helper's <c>.app</c>, given the executable inside it: the binary sits at
+    /// <c>&lt;bundle&gt;/Contents/MacOS/applet</c>, and LaunchServices wants the bundle.
+    /// </summary>
+    internal static string NotifierBundleOf(string executable) =>
+        Path.GetFullPath(Path.Combine(Path.GetDirectoryName(executable) ?? "", "..", ".."));
+
+    /// <summary>
+    /// Asks LaunchServices to re-read the helper bundle, so the icon and name it hands the notification
+    /// centre are the ones in the bundle rather than the ones it happened to see first. Once per run,
+    /// best-effort: a machine without the tool, or one that refuses, still gets its notification.
+    /// </summary>
+    private static void RefreshHelperRegistration(string helperExecutable)
+    {
+        if (Interlocked.Exchange(ref _helperRegistered, 1) == 1) return;
+        if (!File.Exists(LaunchServicesRegister)) return;
+
+        try
+        {
+            Run(LaunchServicesRegister, ["-f", NotifierBundleOf(helperExecutable)], null);
+        }
+        catch (Exception)
+        {
+            // An internal tool that Apple is free to move. Not having it costs a stale icon, not a
+            // notification, so there is nothing here worth failing over.
+        }
+    }
 
     /// <summary>Runs one notification tool. True only if it actually reported success.</summary>
     private static bool Run(string program, IEnumerable<string> arguments, IDictionary<string, string>? environment)

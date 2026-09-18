@@ -183,6 +183,15 @@ jobs:
         if: startsWith(matrix.rid, 'osx-')
         run: scripts/package-macos.sh "${{ matrix.rid }}" "$VERSION"
 
+      # The helper is checked again here, inside the bundle that actually ships. The other job builds
+      # one into a temp directory, which is not the same artifact: this one is built in place, signed
+      # over by `codesign --deep`, and carried through a .dmg and a .pkg. Nothing was looking at what
+      # came out the far end of that, and "the logo is still missing" kept being reported against
+      # builds whose standalone check had passed.
+      - name: Verify the notification helper in the built app
+        if: startsWith(matrix.rid, 'osx-')
+        run: scripts/verify-macos-app.sh "publish/macos-${{ matrix.rid }}/BitKraken.app"
+
       - name: Build portable package
         if: ${{ !startsWith(matrix.rid, 'osx-') }}
         run: scripts/package-portable.sh "${{ matrix.rid }}" "$VERSION"

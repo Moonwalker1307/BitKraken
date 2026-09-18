@@ -89,6 +89,21 @@ public class DesktopNotifierTests
         Assert.Equal(applet, DesktopNotifier.NotifierExecutable(Path.Combine(contents, "MacOS")));
     }
 
+    /// <summary>
+    /// LaunchServices is handed the helper's bundle, not the binary inside it. Getting this wrong means
+    /// the stale record it was meant to refresh stays stale, and nothing says so.
+    /// </summary>
+    [Fact]
+    public void The_bundle_re_registered_is_the_helper_app_not_the_binary()
+    {
+        var applet = Path.Combine("/Applications", "BitKraken.app", "Contents", "Helpers",
+            "BitKraken Notifier.app", "Contents", "MacOS", "applet");
+
+        Assert.Equal(
+            Path.Combine("/Applications", "BitKraken.app", "Contents", "Helpers", "BitKraken Notifier.app"),
+            DesktopNotifier.NotifierBundleOf(applet));
+    }
+
     /// <summary>Outside a bundle - `dotnet run` - there is no helper, and the caller has to be told so.</summary>
     [Fact]
     public void No_helper_outside_the_bundle()

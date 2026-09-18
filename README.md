@@ -170,9 +170,27 @@ the helper, checks that the icon in it really is BitKraken's rather than the gen
 posts a notification through it, and fails the build unless the helper's own bundle is what posted it and
 macOS accepted it. What the icon looks like once drawn still needs eyes.
 
-One thing to know when testing a change to this: macOS caches an app's icon against its bundle id, so a Mac
-that has already seen a build of the helper may keep showing the icon it saw first. Deleting the old
-`BitKraken.app` before installing the new one avoids chasing a cache instead of a bug.
+That check builds a helper into a temp directory, which is not the artifact that ships: the real one is built
+in place, signed over by `codesign --deep`, and carried through a `.dmg` and a `.pkg`. So
+[`scripts/verify-macos-app.sh`](scripts/verify-macos-app.sh) checks the helper inside a finished
+`BitKraken.app` as well, and the macOS packaging job runs it on every build.
+
+It also runs against an installed copy, which is the thing to reach for when a notification turns up wearing
+the wrong face:
+
+```sh
+scripts/verify-macos-app.sh            # defaults to /Applications/BitKraken.app
+```
+
+It reports the helper's identity, its icon and whether that icon is the app's own, and says whether the
+problem is the bundle or the machine.
+
+That distinction matters, because the machine really can be the problem. LaunchServices keeps the first
+record it saw of a bundle id, and that record is where the notification centre gets the icon and name it
+draws — so a Mac that met an earlier build of the helper, when it still wore `osacompile`'s generic icon,
+goes on drawing that one however correct the bundle on disk now is. BitKraken re-registers the helper with
+LaunchServices before its first notification of each run, which is enough on its own; the script prints the
+manual cache-clearing steps for the case where it is not.
 
 ## Watch folder
 
