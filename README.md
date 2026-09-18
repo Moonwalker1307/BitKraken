@@ -128,6 +128,10 @@ Notifications use whatever the desktop already provides, rather than BitKraken t
 | Linux | `notify-send` — the freedesktop.org standard, present on most desktops |
 | Windows | a toast raised through PowerShell's WinRT bridge, so it is attributed to "Windows PowerShell" rather than to BitKraken, which would need its own registered AppUserModelID |
 
+The Linux and Windows notifications carry the BitKraken logo, which is unpacked out of the binary into the
+cache directory the first time one is shown, since a notification daemon can only be handed a path. macOS
+cannot: `display notification` always shows the icon of the process that raised the event — osascript's.
+
 All three are best-effort: a machine without the tool gets nothing, and the in-app toast is always shown as
 well, so nothing is ever only said out here.
 
@@ -317,7 +321,8 @@ src/BitKraken/
   Services/      TorrentService (MonoTorrent wrapper + the reconcile loop), SettingsService,
                  TorrentPreferences (per-torrent store), TorrentQueue / SeedLimits (the queue and
                  seeding rules, as pure logic), WatchFolderService, TrayIconHost, DesktopNotifier,
-                 ShellIntegration (magnet / .torrent registration), SingleInstance, IDialogService
+                 AppIcon (the logo as a file, for the desktop), ShellIntegration (magnet / .torrent
+                 registration), SingleInstance, IDialogService
   ViewModels/    MVVM view-models (CommunityToolkit.Mvvm)
   Views/         MainWindow + Add / Settings / Remove dialogs (Avalonia XAML)
   Styles/        Colors.axaml (palette, icons) and Theme.axaml (control styles, animations)

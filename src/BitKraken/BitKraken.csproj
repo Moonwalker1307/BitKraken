@@ -24,6 +24,9 @@
 
   <ItemGroup>
     <AvaloniaResource Include="Assets/**" />
+    <!-- Also embedded plainly: Avalonia's resource loader needs an initialized app, and the logo has
+         to be readable before that and off the UI thread when it is unpacked for the desktop. -->
+    <EmbeddedResource Include="Assets/bitkraken.png" LogicalName="BitKraken.Assets.bitkraken.png" />
   </ItemGroup>
 
   <ItemGroup>
