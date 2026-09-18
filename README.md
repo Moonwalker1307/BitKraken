@@ -183,9 +183,14 @@ scripts/verify-macos-app.sh            # defaults to /Applications/BitKraken.app
 ```
 
 It reports the helper's identity, its icon and whether that icon is the app's own, and says whether the
-problem is the bundle or the machine. macOS caches an app's icon against its bundle id, so a Mac that has
-already seen one build of the helper can keep showing the icon it saw first however correct the new bundle
-is; the script prints how to clear that if everything it can check comes back clean.
+problem is the bundle or the machine.
+
+That distinction matters, because the machine really can be the problem. LaunchServices keeps the first
+record it saw of a bundle id, and that record is where the notification centre gets the icon and name it
+draws — so a Mac that met an earlier build of the helper, when it still wore `osacompile`'s generic icon,
+goes on drawing that one however correct the bundle on disk now is. BitKraken re-registers the helper with
+LaunchServices before its first notification of each run, which is enough on its own; the script prints the
+manual cache-clearing steps for the case where it is not.
 
 ## Watch folder
 

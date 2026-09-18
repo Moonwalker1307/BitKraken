@@ -31,6 +31,20 @@ public static class DesktopNotifier
     /// </summary>
     internal const string NotifierBundleName = AppInfo.Name + " Notifier.app";
 
+    /// <summary>
+    /// LaunchServices' record of a bundle is where macOS gets the name and icon it draws on a
+    /// notification, and it keeps the first one it saw. The helper shipped twice wearing osacompile's
+    /// generic icon before it carried BitKraken's, so on any Mac that ran those builds the stale record
+    /// is what shows - however right the bundle on disk now is, which is the state this was left in.
+    /// Re-registering costs one short-lived subprocess, once per run, and spares anyone having to go
+    /// deleting icon caches by hand.
+    /// </summary>
+    private const string LaunchServicesRegister =
+        "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister";
+
+    /// <summary>Set once the helper has been re-registered, so it happens on the first notification only.</summary>
+    private static int _helperRegistered;
+
     /// <summary>The environment BitKraken hands a notification tool, so no text of the user's is ever code.</summary>
     private static Dictionary<string, string> NotifyEnvironment(string title, string body, string? icon = null) =>
         new()
@@ -101,7 +115,11 @@ public static class DesktopNotifier
             try
             {
                 var helper = NotifierExecutable();
-                if (helper is not null && Run(helper, [], NotifyEnvironment(title, body))) return;
+                if (helper is not null)
+                {
+                    RefreshHelperRegistration(helper);
+                    if (Run(helper, [], NotifyEnvironment(title, body))) return;
+                }
             }
             catch (Exception)
             {
@@ -189,6 +207,34 @@ public static class DesktopNotifier
         .Replace("\n", "\\n")
         .Replace("\r", "\\n")
         .Replace("\t", "\\t");
+
+    /// <summary>
+    /// The helper's <c>.app</c>, given the executable inside it: the binary sits at
+    /// <c>&lt;bundle&gt;/Contents/MacOS/applet</c>, and LaunchServices wants the bundle.
+    /// </summary>
+    internal static string NotifierBundleOf(string executable) =>
+        Path.GetFullPath(Path.Combine(Path.GetDirectoryName(executable) ?? "", "..", ".."));
+
+    /// <summary>
+    /// Asks LaunchServices to re-read the helper bundle, so the icon and name it hands the notification
+    /// centre are the ones in the bundle rather than the ones it happened to see first. Once per run,
+    /// best-effort: a machine without the tool, or one that refuses, still gets its notification.
+    /// </summary>
+    private static void RefreshHelperRegistration(string helperExecutable)
+    {
+        if (Interlocked.Exchange(ref _helperRegistered, 1) == 1) return;
+        if (!File.Exists(LaunchServicesRegister)) return;
+
+        try
+        {
+            Run(LaunchServicesRegister, ["-f", NotifierBundleOf(helperExecutable)], null);
+        }
+        catch (Exception)
+        {
+            // An internal tool that Apple is free to move. Not having it costs a stale icon, not a
+            // notification, so there is nothing here worth failing over.
+        }
+    }
 
     /// <summary>Runs one notification tool. True only if it actually reported success.</summary>
     private static bool Run(string program, IEnumerable<string> arguments, IDictionary<string, string>? environment)
