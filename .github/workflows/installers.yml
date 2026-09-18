@@ -104,6 +104,16 @@ jobs:
 
       - run: dotnet test tests/BitKraken.Tests/BitKraken.Tests.csproj --configuration Release --logger "console;verbosity=normal"
 
+  # Whether a notification carries BitKraken's logo comes down to which bundle posted it, and no
+  # Linux box can answer that. This runs the helper on a real Mac and checks it is the one posting.
+  notifier:
+    name: macOS notification helper
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - run: scripts/verify-macos-notifier.sh
+
   package:
     name: ${{ matrix.name }}
     needs: [version, test]

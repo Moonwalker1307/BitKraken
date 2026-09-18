@@ -141,18 +141,33 @@ well, so nothing is ever only said out here.
 
 macOS shows the icon of whichever *bundle* posted a notification, and there is no way to override it — which
 is why a plain `osascript` notification arrives as Script Editor, whatever image you hand it. So the `.app`
-carries a second, tiny bundle at `Contents/Helpers/BitKraken Notifier.app`: an empty AppleScript applet whose
-only job is to own BitKraken's icon. The app tells that bundle to post the notification, the command runs
-inside it, and the right face comes with it.
+carries a second, tiny bundle at `Contents/Helpers/BitKraken Notifier.app`: an AppleScript applet whose only
+job is to own BitKraken's icon and post notifications from inside it.
 
-It is built by [`scripts/package-macos.sh`](scripts/package-macos.sh) and signed with the app. A build running
-outside the bundle — straight off `dotnet run` — has no helper to ask, so the notification is posted the plain
-way and looks the way it always did. That fallback is automatic: if the helper is missing or refuses, macOS is
-never left with no notification at all.
+BitKraken **runs** the helper; it does not ask it to post anything. The difference is the whole fix. Telling
+the bundle to post one from outside — `tell application id "…" to display notification` — looks equivalent and
+needs three things to be true that nobody tells you about: LaunchServices has to resolve a bundle id nested in
+`Contents/Helpers`, an applet has to answer an Apple event it has no handler for, and the user has to have
+granted BitKraken automation access. When any of them does not hold, the event fails silently and the
+notification falls back to the plain command — arriving, once again, as Script Editor. That is what shipped in
+`1.0.6-preview-25` and why it looked exactly like no fix at all. Running the applet needs none of the three.
+
+The title and body reach the applet as environment variables, never as script source, so a torrent whose name
+is full of quotes is still just a name.
+
+It is built by [`scripts/build-macos-notifier.sh`](scripts/build-macos-notifier.sh), from
+[`packaging/macos/notifier.applescript`](packaging/macos/notifier.applescript), and signed with the app. A
+build running outside the bundle — straight off `dotnet run` — has no helper, so the notification is posted the
+plain way and looks the way it always did.
 
 Two things follow from the notification being a different bundle. It asks for notification permission under
 its own name the first time it posts, and it appears on its own line in **System Settings → Notifications** —
 as "BitKraken", since that is the name and icon it carries.
+
+Which bundle posted a notification is not something a Linux test run can see, so
+[`scripts/verify-macos-notifier.sh`](scripts/verify-macos-notifier.sh) runs on a macOS runner in CI: it builds
+the helper, posts a notification through it, and fails the build unless the helper's own bundle is what posted
+it and macOS accepted it. The icon itself still needs eyes.
 
 ## Watch folder
 

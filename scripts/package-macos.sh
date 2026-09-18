@@ -18,6 +18,9 @@ VERSION="${VERSION#v}"
 VERSION_CORE="${VERSION%%-*}"
 APP_NAME="BitKraken"
 BUNDLE_ID="com.thorstholm.bitkraken"
+# Where BitKraken looks for the helper: DesktopNotifier builds this same path off its own
+# executable, and a pinning test fails if only one of the two is ever changed.
+NOTIFIER_APP="$APP_NAME Notifier.app"
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 OUT="$ROOT/publish/$RID"
@@ -50,24 +53,12 @@ iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/$APP_NAME.icns"
 
 # A notification wears the icon of the bundle that posted it, and osascript's bundle is Script
 # Editor's - which is why notifications never carried the logo however the image was passed. This
-# applet exists only to be a bundle with BitKraken's icon: the app tells it to post the notification
-# and the command runs in here, so the right face comes with it. It has no script of its own.
+# applet exists only to be a bundle with BitKraken's icon: BitKraken runs it, the notification is
+# posted from inside it, and the right face comes with it. Built before signing, so --deep covers it.
 echo "==> Building the notification helper"
-NOTIFIER="$APP/Contents/Helpers/$APP_NAME Notifier.app"
-mkdir -p "$APP/Contents/Helpers"
-printf 'on run\nend run\n' > "$STAGE/notifier.applescript"
-osacompile -o "$NOTIFIER" "$STAGE/notifier.applescript"
-
-# The applet ships with its own generic icon; replace it with ours, under the name osacompile wrote
-# into its Info.plist. The bundle id has to match DesktopNotifier.NotifierBundleId.
-cp "$APP/Contents/Resources/$APP_NAME.icns" "$NOTIFIER/Contents/Resources/applet.icns"
-NOTIFIER_PLIST="$NOTIFIER/Contents/Info.plist"
-plutil -replace CFBundleIdentifier -string "$BUNDLE_ID.notifier" "$NOTIFIER_PLIST"
-plutil -replace CFBundleName -string "$APP_NAME" "$NOTIFIER_PLIST"
-
-# No Dock icon and no menu bar for it: it is launched to post a notification, not to be used.
-plutil -replace LSUIElement -bool true "$NOTIFIER_PLIST" 2>/dev/null \
-  || plutil -insert LSUIElement -bool true "$NOTIFIER_PLIST"
+NOTIFIER="$APP/Contents/Helpers/$NOTIFIER_APP"
+"$ROOT/scripts/build-macos-notifier.sh" \
+  "$NOTIFIER" "$BUNDLE_ID.notifier" "$APP_NAME" "$APP/Contents/Resources/$APP_NAME.icns"
 
 echo "==> Signing"
 if [ -n "${SIGNING_IDENTITY:-}" ]; then

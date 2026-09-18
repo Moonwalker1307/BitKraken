@@ -7,7 +7,7 @@ namespace BitKraken.Services;
 /// notification API, so each platform gets the tool it ships with rather than BitKraken taking on a
 /// dependency for it:
 /// <list type="bullet">
-///   <item><description>macOS - <c>osascript</c>, posting as the helper bundle so the logo shows.</description></item>
+///   <item><description>macOS - the helper applet inside the bundle, which posts it so the logo shows.</description></item>
 ///   <item><description>Linux - <c>notify-send</c>, the freedesktop.org standard, present on most desktops.</description></item>
 ///   <item><description>Windows - a toast raised through PowerShell's WinRT bridge.</description></item>
 /// </list>
@@ -17,7 +17,7 @@ namespace BitKraken.Services;
 /// All three carry the BitKraken logo, by two different routes. Linux and Windows are handed
 /// <see cref="AppIcon"/>, because their notifications take an image. macOS does not take one at all:
 /// it shows the icon of the bundle that posted the notification, which for <c>osascript</c> is Script
-/// Editor's. So the image is not what changes there, the poster is - see <see cref="NotifierBundleId"/>.
+/// Editor's. So the image is not what changes there, the poster is - see <see cref="NotifierExecutable"/>.
 /// </para>
 /// </summary>
 public static class DesktopNotifier
@@ -27,9 +27,19 @@ public static class DesktopNotifier
 
     /// <summary>
     /// The helper bundle inside BitKraken.app that exists only to put a face on a notification.
-    /// Built by scripts/package-macos.sh; keep the two in step.
+    /// Built by scripts/build-macos-notifier.sh under this name; keep the two in step.
     /// </summary>
-    internal const string NotifierBundleId = "com.thorstholm.bitkraken.notifier";
+    internal const string NotifierBundleName = AppInfo.Name + " Notifier.app";
+
+    /// <summary>The environment BitKraken hands a notification tool, so no text of the user's is ever code.</summary>
+    private static Dictionary<string, string> NotifyEnvironment(string title, string body, string? icon = null) =>
+        new()
+        {
+            ["BITKRAKEN_NOTIFY_TITLE"] = title,
+            ["BITKRAKEN_NOTIFY_BODY"] = body,
+            // A toast reads its image as a URI, and an empty value tells the script there is none.
+            ["BITKRAKEN_NOTIFY_ICON"] = icon ?? "",
+        };
 
     /// <summary>
     /// Raises a toast through PowerShell. Title, body and icon path arrive as environment variables so
@@ -85,34 +95,29 @@ public static class DesktopNotifier
     {
         if (OperatingSystem.IsMacOS())
         {
-            // Two goes. The first asks the helper bundle to post it, so the notification arrives
-            // wearing BitKraken's icon; the second is the plain command, for a build running outside
-            // the .app - straight off `dotnet run` - where there is no helper to ask. The attempt is
-            // guarded as well as checked, because the fallback has to happen whether asking the helper
-            // came back unhappy or threw on the way there.
+            // The helper posts the notification by running: it is a bundle carrying BitKraken's icon,
+            // and a notification wears the icon of whatever process posted it. Title and body go in
+            // its environment, so no torrent's name is ever read as script.
             try
             {
-                if (Run("osascript", ["-e", AppleScript(title, body, NotifierBundleId)], null)) return;
+                var helper = NotifierExecutable();
+                if (helper is not null && Run(helper, [], NotifyEnvironment(title, body))) return;
             }
             catch (Exception)
             {
                 // Fall through to the plain command below.
             }
 
-            Run("osascript", ["-e", AppleScript(title, body, postedBy: null)], null);
+            // No helper: a build running outside the .app, straight off `dotnet run`. Script Editor's
+            // icon is a poor second, and still better than saying nothing.
+            Run("osascript", ["-e", AppleScript(title, body)], null);
         }
         else if (OperatingSystem.IsWindows())
         {
             Run(
                 "powershell.exe",
                 ["-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", WindowsToastScript],
-                new Dictionary<string, string>
-                {
-                    ["BITKRAKEN_NOTIFY_TITLE"] = title,
-                    ["BITKRAKEN_NOTIFY_BODY"] = body,
-                    // A toast reads its image as a URI, and an empty value tells the script there is none.
-                    ["BITKRAKEN_NOTIFY_ICON"] = ToastImageUri(AppIcon.FilePath),
-                });
+                NotifyEnvironment(title, body, ToastImageUri(AppIcon.FilePath)));
         }
         else
         {
@@ -133,18 +138,41 @@ public static class DesktopNotifier
     }
 
     /// <summary>
-    /// The AppleScript that posts one notification. <paramref name="postedBy"/> is the bundle to post
-    /// it as: macOS shows the icon of whichever bundle raised the notification, and osascript's own is
-    /// Script Editor's, which is why the plain command has never carried the BitKraken logo. Telling
-    /// another application to run the command runs it in that application, and the icon follows.
-    /// Null gives the plain command, posted by osascript.
+    /// The AppleScript that posts one notification the plain way, as osascript - which means wearing
+    /// Script Editor's icon, since macOS attributes a notification to the bundle that posted it. Only
+    /// reached when there is no helper bundle to run, which is why it is a fallback and not the path.
     /// </summary>
-    internal static string AppleScript(string title, string body, string? postedBy)
-    {
+    /// <remarks>
+    /// Telling the helper to post it instead of running it looks like the same thing and is not: the
+    /// Apple event needs LaunchServices to resolve the bundle id, needs an applet to answer an event
+    /// it has no handler for, and needs the user to have granted BitKraken automation access. All
+    /// three have to hold, none of them announces itself when it does not, and the failure is a silent
+    /// fall back to this - a notification with the wrong icon, which is what was shipped and reported.
+    /// </remarks>
+    internal static string AppleScript(string title, string body) =>
         // AppleScript is source, not arguments, so every string has to be escaped into it.
-        var command = $"display notification \"{Escape(body)}\" with title \"{Escape(title)}\"";
+        $"display notification \"{Escape(body)}\" with title \"{Escape(title)}\"";
 
-        return postedBy is null ? command : $"tell application id \"{Escape(postedBy)}\" to {command}";
+    /// <summary>
+    /// The helper applet's executable inside BitKraken.app, or null when there is not one - a build
+    /// run outside the bundle. The app's own binaries live in <c>Contents/MacOS</c>, so the helper is
+    /// one directory up and over.
+    /// </summary>
+    internal static string? NotifierExecutable(string? baseDirectory = null)
+    {
+        try
+        {
+            var path = Path.GetFullPath(Path.Combine(
+                baseDirectory ?? AppContext.BaseDirectory,
+                "..", "Helpers", NotifierBundleName, "Contents", "MacOS", "applet"));
+
+            return File.Exists(path) ? path : null;
+        }
+        catch (Exception)
+        {
+            // A base directory that is not a path we can walk up out of. There is no helper, then.
+            return null;
+        }
     }
 
     /// <summary>
