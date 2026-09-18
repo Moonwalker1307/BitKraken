@@ -54,6 +54,13 @@ public sealed class TorrentService : IAsyncDisposable
     private static readonly TimeSpan StopSettleTimeout = TimeSpan.FromSeconds(10);
 
     /// <summary>
+    /// How many times removal will stop a torrent and offer it to the engine. More than one because a
+    /// reconcile already in flight can start it back up in between; only a few because each go is a full
+    /// stop, and something restarting it that persistently is a bug rather than a race worth riding out.
+    /// </summary>
+    private const int RemoveAttempts = 3;
+
+    /// <summary>
     /// Picks pieces in order instead of rarest-first. Both of MonoTorrent's usual heuristics have to go:
     /// rarest-first reorders the whole torrent, and the randomiser shuffles whatever is left. File
     /// priorities are still honoured, so a file set to Highest is the one that fills up first.
@@ -98,6 +105,15 @@ public sealed class TorrentService : IAsyncDisposable
     /// spelled as a dictionary because the UI thread adds to it while the reconcile timer reads it.
     /// </summary>
     private readonly ConcurrentDictionary<string, bool> _seedLimitWaived = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Torrents on their way out of the engine. Removing one means stopping it and then handing it over,
+    /// and the engine will only unregister a torrent that is Stopped - but stopping it raises a state
+    /// change, every state change asks for a reconcile, and a reconcile starts whatever is owed a slot.
+    /// So removal stopped a torrent and the queue started it again, every time, before the engine was
+    /// ever asked. This is how the pass that decides what runs is told that this one is leaving.
+    /// </summary>
+    private readonly ConcurrentDictionary<string, bool> _removing = new(StringComparer.OrdinalIgnoreCase);
 
     private Timer? _reconcileTimer;
     private ClientEngine? _engine;
@@ -282,18 +298,49 @@ public sealed class TorrentService : IAsyncDisposable
 
     public async Task RemoveAsync(TorrentManager manager, bool deleteData)
     {
-        // The engine refuses to unregister a torrent that is not stopped, and says so in words that
-        // mean nothing to anyone reading a toast, so make sure of it before handing it over.
-        if (!await StopCompletelyAsync(manager))
-            throw new InvalidOperationException($"\"{manager.Name}\" is still stopping. Try removing it again in a moment.");
+        var key = Key(manager);
+        var name = manager.Name;
 
-        var mode = deleteData ? RemoveMode.CacheDataAndDownloadedData : RemoveMode.CacheDataOnly;
-        await Engine.RemoveAsync(manager, mode);
+        // Said before anything is stopped. Stopping raises a state change, a state change asks for a
+        // reconcile, and a reconcile starts whatever wants to run - so without this the queue puts the
+        // torrent straight back up, and the engine then refuses to unregister a torrent that is running.
+        _removing[key] = true;
 
-        // Forgotten only once the engine has really let go: undoing this first would lose the torrent's
-        // queue position, its paused state and its totals while leaving the torrent itself in the list.
-        Forget(Key(manager));
-        _preferences.Save();
+        try
+        {
+            var mode = deleteData ? RemoveMode.CacheDataAndDownloadedData : RemoveMode.CacheDataOnly;
+
+            // A pass that was already deciding when we said it can still start the torrent, and the
+            // engine re-checks the state on its own loop after we have checked ours. Neither window is
+            // closed by the flag alone, and both are answered by going round again rather than failing.
+            for (var attempt = 1; ; attempt++)
+            {
+                // The engine refuses to unregister a torrent that is not stopped, and says so in words
+                // that mean nothing to anyone reading a toast, so make sure of it before handing it over.
+                if (!await StopCompletelyAsync(manager))
+                    throw new InvalidOperationException($"\"{name}\" will not stop. Try removing it again in a moment.");
+
+                try
+                {
+                    await Engine.RemoveAsync(manager, mode);
+                    break;
+                }
+                catch (TorrentException) when (attempt < RemoveAttempts)
+                {
+                    // Started again between our stop and the engine's check. Stop it and re-ask.
+                }
+            }
+
+            // Forgotten only once the engine has really let go: undoing this first would lose the
+            // torrent's queue position, its paused state and its totals while leaving it in the list.
+            Forget(key);
+            _preferences.Save();
+        }
+        finally
+        {
+            // A torrent still in the list because removal failed has to be allowed to run again.
+            _removing.TryRemove(key, out _);
+        }
 
         TorrentRemoved?.Invoke(this, manager);
         _ = SaveStateAsync();
@@ -524,6 +571,9 @@ public sealed class TorrentService : IAsyncDisposable
     /// <summary>A torrent nobody has paused and nothing has finished with is owed a place in the queue.</summary>
     private bool WantsToRun(string key)
     {
+        // Whatever its preferences still say, a torrent being removed is not owed anything.
+        if (_removing.ContainsKey(key)) return false;
+
         var overrides = _preferences.Get(key);
         return !overrides.PausedByUser && !overrides.SeedLimitReached;
     }
