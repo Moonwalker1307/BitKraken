@@ -21,6 +21,32 @@ There is no display in a headless session, so don't reach for `dotnet run` to ch
 plus `BITKRAKEN_DEBUG_SELECT`, `BITKRAKEN_DEBUG_TAB`, `BITKRAKEN_DEBUG_DIALOG` and
 `BITKRAKEN_DEBUG_CLOSE_AFTER` (see the README's *Developer hooks* table).
 
+A cloud session may have no `dotnet` on the path and no route to Microsoft's download hosts to
+install one. Then nothing here can be built or tested locally: push the branch, let `tests.yml` run
+the suite, and say the tests ran in CI rather than implying they ran here.
+
+## Where things live
+
+Everything is in one project, `src/BitKraken`:
+
+- `Services/TorrentService.cs` — owns the MonoTorrent `ClientEngine`, persistence and the reconcile
+  loop. The pure rules it consults sit beside it: `TorrentQueue.cs`, `SeedLimits.cs`.
+- `Services/OutboundConnector.cs`, `BoundSocketConnector.cs`, `BoundHttpClientFactory.cs`,
+  `NetworkBinding.cs` — interface binding and every outgoing connection.
+- `Services/ProxyClient.cs`, `Socks5.cs`, `HttpConnect.cs`, `ProxyConfiguration.cs`,
+  `ProxyBlockedTrackerConnection.cs` — the proxy. The wire formats are pure bytes so they test
+  without a socket.
+- `Services/SettingsService.cs` + `Models/AppSettings.cs` — global settings; `TorrentPreferences.cs`
+  + `Models/TorrentOverrides.cs` — per-torrent state MonoTorrent doesn't keep (`torrents.json`).
+- `Services/DesktopNotifier.cs`, `MacNotifications.cs`, `TrayIconHost.cs`, `ShellIntegration.cs`,
+  `SingleInstance.cs`, `WatchFolderService.cs` — the desktop integration, one platform branch each.
+- `ViewModels/`, `Views/`, `Controls/`, `Styles/` — the Avalonia side; `App.axaml.cs` wires the
+  engine, window and tray together.
+
+Outside `src/`: `scripts/` builds and packages per platform (CI calls the `package-*.sh` scripts
+directly; `publish.sh`/`publish.ps1` are for building by hand), `packaging/` holds the macOS `Info.plist`/entitlements/notifier applet and the Windows Inno
+Setup script, and `.github/workflows/` has `tests.yml` and `installers.yml`.
+
 ## Architecture invariants
 
 These are the things to preserve. Most of them are not enforced by a test.
