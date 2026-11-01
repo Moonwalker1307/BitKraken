@@ -170,6 +170,35 @@ public class TorrentPreferencesTests
     }
 
     [Fact]
+    public void Several_torrents_moved_to_the_top_go_as_a_block_in_the_order_they_already_had()
+    {
+        var dir = TestEnvironment.NewDirectory();
+        var preferences = Loaded(dir);
+
+        foreach (var key in new[] { "a", "b", "c", "d" }) preferences.EnsureTracked(key);
+
+        // Listed out of order on purpose: the selection's order must not decide the queue's.
+        preferences.MoveToTop(["d", "b"]);
+
+        var order = new[] { "a", "b", "c", "d" }.OrderBy(k => preferences.Get(k).QueueOrder).ToArray();
+        Assert.Equal(new[] { "b", "d", "a", "c" }, order);
+    }
+
+    [Fact]
+    public void Several_torrents_moved_to_the_bottom_go_as_a_block_in_the_order_they_already_had()
+    {
+        var dir = TestEnvironment.NewDirectory();
+        var preferences = Loaded(dir);
+
+        foreach (var key in new[] { "a", "b", "c", "d" }) preferences.EnsureTracked(key);
+
+        preferences.MoveToBottom(["c", "a"]);
+
+        var order = new[] { "a", "b", "c", "d" }.OrderBy(k => preferences.Get(k).QueueOrder).ToArray();
+        Assert.Equal(new[] { "b", "d", "a", "c" }, order);
+    }
+
+    [Fact]
     public void The_queue_order_of_torrents_that_were_already_there_is_never_reused()
     {
         var dir = TestEnvironment.NewDirectory();

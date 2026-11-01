@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using Avalonia.Controls.Selection;
 using Avalonia.Threading;
 using BitKraken.Services;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -46,6 +47,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase
             _uploadHistory.Enqueue(0);
         }
 
+        Selection.SelectionChanged += (_, _) => OnSelectionChanged();
+
         _tick = new DispatcherTimer(TimeSpan.FromSeconds(1), DispatcherPriority.Background, async (_, _) => await TickAsync());
         ApplyUiSettings();
     }
@@ -54,12 +57,24 @@ public sealed partial class MainWindowViewModel : ViewModelBase
     public ObservableCollection<TorrentItemViewModel> FilteredTorrents { get; } = [];
     public ObservableCollection<ToastViewModel> Toasts { get; } = [];
 
-    [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(HasSelection))]
-    [NotifyCanExecuteChangedFor(nameof(StartSelectedCommand), nameof(PauseSelectedCommand), nameof(RemoveSelectedCommand),
-        nameof(RecheckSelectedCommand), nameof(OpenFolderCommand), nameof(CopyMagnetCommand),
-        nameof(MoveToTopOfQueueCommand), nameof(MoveToBottomOfQueueCommand))]
-    private TorrentItemViewModel? _selectedTorrent;
+    /// <summary>
+    /// What is selected in the torrent list. The list binds to this model rather than to a single
+    /// <c>SelectedItem</c>, so Shift and Ctrl/⌘ can pick several torrents and the actions take them all.
+    /// Its source is <see cref="FilteredTorrents"/>, which the list hands it.
+    /// </summary>
+    public SelectionModel<TorrentItemViewModel> Selection { get; } = new() { SingleSelect = false };
+
+    /// <summary>Every selected torrent, in list order. What Start, Pause, Remove and the rest act on.</summary>
+    public IReadOnlyList<TorrentItemViewModel> SelectedTorrents { get; private set; } = [];
+
+    /// <summary>
+    /// The one torrent the details panel shows: the first selected in the list. Things that only make
+    /// sense for one torrent at a time, like opening its folder, use this too.
+    /// </summary>
+    public TorrentItemViewModel? SelectedTorrent { get; private set; }
+
+    public bool HasMultipleSelected => SelectedTorrents.Count > 1;
+    public string SelectionText => $"{SelectedTorrents.Count} selected";
 
     [ObservableProperty] private TorrentFilter _filter = TorrentFilter.All;
     [ObservableProperty] private string _searchText = "";
@@ -146,9 +161,50 @@ public sealed partial class MainWindowViewModel : ViewModelBase
 
     partial void OnSearchTextChanged(string value) => ApplyFilter();
 
-    partial void OnSelectedTorrentChanged(TorrentItemViewModel? value)
+    /// <summary>Selects just this torrent, as a plain click would.</summary>
+    public void Select(TorrentItemViewModel? torrent)
     {
-        if (value is not null) _ = value.RefreshDetailsAsync();
+        var index = torrent is null ? -1 : FilteredTorrents.IndexOf(torrent);
+        if (index < 0) Selection.Clear();
+        else Selection.SelectedIndex = index;
+        OnSelectionChanged();
+    }
+
+    /// <summary>
+    /// Re-reads the selection. Called when the list's selection changes, and after the filter has edited
+    /// the list, since a selected torrent that drops out of the filter drops out of the selection with it.
+    /// </summary>
+    private void OnSelectionChanged()
+    {
+        var selected = Selection.SelectedIndexes
+            .Where(i => i >= 0 && i < FilteredTorrents.Count)
+            .Order()
+            .Select(i => FilteredTorrents[i])
+            .ToList();
+        if (selected.SequenceEqual(SelectedTorrents)) return;
+
+        var previous = SelectedTorrent;
+        SelectedTorrents = selected;
+        SelectedTorrent = selected.FirstOrDefault();
+
+        OnPropertyChanged(nameof(SelectedTorrents));
+        OnPropertyChanged(nameof(HasMultipleSelected));
+        OnPropertyChanged(nameof(SelectionText));
+        OnPropertyChanged(nameof(HasSelection));
+        if (!ReferenceEquals(previous, SelectedTorrent))
+        {
+            OnPropertyChanged(nameof(SelectedTorrent));
+            if (SelectedTorrent is { } shown) _ = shown.RefreshDetailsAsync();
+        }
+
+        StartSelectedCommand.NotifyCanExecuteChanged();
+        PauseSelectedCommand.NotifyCanExecuteChanged();
+        RemoveSelectedCommand.NotifyCanExecuteChanged();
+        RecheckSelectedCommand.NotifyCanExecuteChanged();
+        OpenFolderCommand.NotifyCanExecuteChanged();
+        CopyMagnetCommand.NotifyCanExecuteChanged();
+        MoveToTopOfQueueCommand.NotifyCanExecuteChanged();
+        MoveToBottomOfQueueCommand.NotifyCanExecuteChanged();
     }
 
     private void ApplyUiSettings()
@@ -235,7 +291,6 @@ public sealed partial class MainWindowViewModel : ViewModelBase
     {
         if (!_lookup.Remove(manager, out var vm)) return;
         Torrents.Remove(vm);
-        if (SelectedTorrent == vm) SelectedTorrent = null;
         ApplyFilter();
         UpdateCounts();
     }
@@ -249,14 +304,9 @@ public sealed partial class MainWindowViewModel : ViewModelBase
             .OrderByDescending(t => t.AddedAt)
             .ToList();
 
-        // Only touch the collection when membership/order actually changed to avoid flicker.
-        if (visible.Count == FilteredTorrents.Count && visible.Zip(FilteredTorrents).All(p => ReferenceEquals(p.First, p.Second)))
-            return;
-
-        var selected = SelectedTorrent;
-        FilteredTorrents.Clear();
-        foreach (var t in visible) FilteredTorrents.Add(t);
-        if (selected is not null && visible.Contains(selected)) SelectedTorrent = selected;
+        // Edit rather than refill, so the torrents that stay keep their place and their selection.
+        FilteredTorrents.SyncTo(visible);
+        OnSelectionChanged();
 
         IsEmpty = Torrents.Count == 0;
         IsFilteredEmpty = !IsEmpty && FilteredTorrents.Count == 0;
@@ -431,36 +481,50 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         if (_lookup.TryGetValue(manager, out var vm))
         {
             if (!vm.MatchesFilter(Filter)) Filter = TorrentFilter.All;
-            SelectedTorrent = vm;
+            Select(vm);
         }
     }
 
-    [RelayCommand(CanExecute = nameof(HasSelection))]
-    private Task StartSelected() => SelectedTorrent is { } t ? _service.StartAsync(t.Manager) : Task.CompletedTask;
+    private List<TorrentManager> SelectedManagers() => SelectedTorrents.Select(t => t.Manager).ToList();
 
     [RelayCommand(CanExecute = nameof(HasSelection))]
-    private Task PauseSelected() => SelectedTorrent is { } t ? _service.PauseAsync(t.Manager) : Task.CompletedTask;
+    private Task StartSelected() => HasSelection ? _service.StartAsync(SelectedManagers()) : Task.CompletedTask;
 
     [RelayCommand(CanExecute = nameof(HasSelection))]
-    private Task RecheckSelected() => SelectedTorrent is { } t ? _service.RecheckAsync(t.Manager) : Task.CompletedTask;
+    private Task PauseSelected() => HasSelection ? _service.PauseAsync(SelectedManagers()) : Task.CompletedTask;
+
+    [RelayCommand(CanExecute = nameof(HasSelection))]
+    private async Task RecheckSelected()
+    {
+        foreach (var t in SelectedTorrents.ToList()) await _service.RecheckAsync(t.Manager);
+    }
 
     [RelayCommand(CanExecute = nameof(HasSelection))]
     private async Task RemoveSelected()
     {
-        if (SelectedTorrent is not { } t || Dialogs is null) return;
+        // Copied first: each removal edits the list, and with it the selection.
+        var torrents = SelectedTorrents.ToList();
+        if (torrents.Count == 0 || Dialogs is null) return;
 
-        var choice = await Dialogs.ConfirmRemoveAsync([t.Name]);
+        var choice = await Dialogs.ConfirmRemoveAsync(torrents.Select(t => t.Name).ToList());
         if (choice == RemoveChoice.Cancel) return;
 
-        try
+        var removed = 0;
+        foreach (var t in torrents)
         {
-            await _service.RemoveAsync(t.Manager, deleteData: choice == RemoveChoice.RemoveDeleteData);
-            ShowToast("Removed", t.Name, isError: false);
+            try
+            {
+                await _service.RemoveAsync(t.Manager, deleteData: choice == RemoveChoice.RemoveDeleteData);
+                removed++;
+            }
+            catch (Exception ex)
+            {
+                ShowToast("Couldn't remove torrent", $"{t.Name} - {ex.Message}", isError: true);
+            }
         }
-        catch (Exception ex)
-        {
-            ShowToast("Couldn't remove torrent", ex.Message, isError: true);
-        }
+
+        if (removed > 0)
+            ShowToast("Removed", torrents.Count == 1 ? torrents[0].Name : $"{removed} torrents", isError: false);
     }
 
     [RelayCommand(CanExecute = nameof(HasSelection))]
@@ -471,22 +535,26 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         Dialogs.OpenInFileManager(path);
     }
 
+    /// <summary>With several selected, copies one magnet link per line - the form most clients accept pasted.</summary>
     [RelayCommand(CanExecute = nameof(HasSelection))]
     private async Task CopyMagnet()
     {
-        if (SelectedTorrent is not { } t || Dialogs is null) return;
-        await Dialogs.SetClipboardTextAsync(t.MagnetUri);
-        _lastClipboardMagnet = t.MagnetUri; // don't offer to re-add what we just copied
-        ShowToast("Copied", "Magnet link copied to clipboard.", isError: false);
+        var torrents = SelectedTorrents;
+        if (torrents.Count == 0 || Dialogs is null) return;
+
+        var text = string.Join(Environment.NewLine, torrents.Select(t => t.MagnetUri));
+        await Dialogs.SetClipboardTextAsync(text);
+        _lastClipboardMagnet = text; // don't offer to re-add what we just copied
+        ShowToast("Copied", torrents.Count == 1 ? "Magnet link copied to clipboard." : $"{torrents.Count} magnet links copied to clipboard.", isError: false);
     }
 
     [RelayCommand(CanExecute = nameof(HasSelection))]
     private Task MoveToTopOfQueue() =>
-        SelectedTorrent is { } t ? _service.MoveToTopOfQueueAsync(t.Manager) : Task.CompletedTask;
+        HasSelection ? _service.MoveToTopOfQueueAsync(SelectedManagers()) : Task.CompletedTask;
 
     [RelayCommand(CanExecute = nameof(HasSelection))]
     private Task MoveToBottomOfQueue() =>
-        SelectedTorrent is { } t ? _service.MoveToBottomOfQueueAsync(t.Manager) : Task.CompletedTask;
+        HasSelection ? _service.MoveToBottomOfQueueAsync(SelectedManagers()) : Task.CompletedTask;
 
     /// <summary>
     /// Adds one torrent the watch folder found. The bool is what tells the watcher it may clear the file

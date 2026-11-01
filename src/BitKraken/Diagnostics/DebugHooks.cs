@@ -25,7 +25,7 @@ internal static class DebugHooks
             DispatcherTimer.RunOnce(() =>
             {
                 if (window.DataContext is MainWindowViewModel vm && Environment.GetEnvironmentVariable("BITKRAKEN_DEBUG_SELECT") == "1")
-                    vm.SelectedTorrent = vm.FilteredTorrents.FirstOrDefault();
+                    vm.Select(vm.FilteredTorrents.FirstOrDefault());
                 if (int.TryParse(Environment.GetEnvironmentVariable("BITKRAKEN_DEBUG_TAB"), out var tab) && window.FindControl<TabControl>("DetailsTabs") is { } tabs)
                     tabs.SelectedIndex = tab;
             }, TimeSpan.FromSeconds(2));

@@ -37,6 +37,9 @@ real-time transfer graphs.
 - **Filters & search** — All / Downloading / Seeding / Queued / Completed / Paused / Errors, plus instant name search.
 - **Per-torrent actions** — resume, pause, move to the top or bottom of the queue, force re-check, open folder,
   copy magnet link and remove, from the right-click menu.
+- **Multi-select** — `Shift`+click or `Shift+↑/↓` selects a range, `Ctrl/⌘`+click adds or drops one torrent,
+  `Ctrl/⌘+A` selects them all. Resume, pause, remove, re-check, the queue moves and copy magnet link then act on
+  every selected torrent; the details panel shows the first of them.
 - **Keyboard** — `Ctrl/⌘+O` add file, `Ctrl/⌘+M` add magnet, `Ctrl/⌘+,` settings, `Delete` remove.
 - **Easy on older machines** — the animated aurora background can be turned off in Settings.
 
