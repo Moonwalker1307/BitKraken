@@ -18,8 +18,11 @@ concurrency:
   group: installers-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+# Read-only by default. Only the release job writes (it creates the tag and the GitHub Release), so
+# the packaging jobs, which run the repo's scripts on every pull request, never hold a token that can
+# push to the repository.
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   # Resolved once so every platform in the matrix stamps the same version.
@@ -238,6 +241,8 @@ jobs:
     needs: [version, package]
     if: needs.version.outputs.channel == 'release' || needs.version.outputs.channel == 'tag'
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - name: Download every platform's packages
         uses: actions/download-artifact@v8
