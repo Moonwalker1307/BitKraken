@@ -101,6 +101,29 @@ public sealed class TorrentPreferences
     public void MoveToBottom(string key) =>
         Update(key, e => e.QueueOrder = Interlocked.Increment(ref _nextQueueOrder));
 
+    /// <summary>
+    /// Moves several torrents to the front of the queue as a block. They keep the order they had among
+    /// themselves: moving each one to the top in turn would otherwise leave them in whatever order the
+    /// selection happened to list them, which is the order they were added, not the order they queued in.
+    /// </summary>
+    public void MoveToTop(IReadOnlyCollection<string> keys)
+    {
+        // Last first, so the one that was furthest forward ends up at the very front.
+        foreach (var key in InQueueOrder(keys).AsEnumerable().Reverse()) MoveToTop(key);
+    }
+
+    /// <summary>Moves several torrents behind everything else as a block, keeping their order among themselves.</summary>
+    public void MoveToBottom(IReadOnlyCollection<string> keys)
+    {
+        foreach (var key in InQueueOrder(keys)) MoveToBottom(key);
+    }
+
+    private List<string> InQueueOrder(IReadOnlyCollection<string> keys)
+    {
+        foreach (var key in keys) EnsureTracked(key);
+        return keys.Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(k => Get(k).QueueOrder).ToList();
+    }
+
     /// <summary>Writes the store out if anything changed since the last save.</summary>
     public void Save(bool force = false)
     {

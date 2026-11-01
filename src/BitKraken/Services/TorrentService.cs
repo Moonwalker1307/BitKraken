@@ -267,31 +267,45 @@ public sealed class TorrentService : IAsyncDisposable
     }
 
     /// <summary>The user asked for this torrent. Whether it runs now is still up to the queue.</summary>
-    public async Task StartAsync(TorrentManager manager)
-    {
-        var key = Key(manager);
-        _preferences.Update(key, e =>
-        {
-            e.PausedByUser = false;
-            e.SeedLimitReached = false;
-        });
+    public Task StartAsync(TorrentManager manager) => StartAsync([manager]);
 
-        // Starting a torrent by hand overrides its seeding limit for the rest of the session. Re-arming
-        // it here would only stop the torrent again a second later, which is not what the click meant.
-        if (SeedLimitFor(key).IsReached(RatioOf(manager), SeededFor(key)))
-            _seedLimitWaived[key] = true;
+    /// <summary>
+    /// The user asked for all of these at once. Every preference is changed before the one reconcile,
+    /// rather than a reconcile per torrent: with a full queue, starting them one at a time would let the
+    /// first few take the free slots and start, only for the next reconcile to weigh them again.
+    /// </summary>
+    public async Task StartAsync(IReadOnlyCollection<TorrentManager> managers)
+    {
+        foreach (var manager in managers)
+        {
+            var key = Key(manager);
+            _preferences.Update(key, e =>
+            {
+                e.PausedByUser = false;
+                e.SeedLimitReached = false;
+            });
+
+            // Starting a torrent by hand overrides its seeding limit for the rest of the session. Re-arming
+            // it here would only stop the torrent again a second later, which is not what the click meant.
+            if (SeedLimitFor(key).IsReached(RatioOf(manager), SeededFor(key)))
+                _seedLimitWaived[key] = true;
+        }
 
         _preferences.Save();
 
         // An errored torrent has to be put back to Stopped before anything can start it again.
-        if (manager.State == TorrentState.Error) await SafeStopAsync(manager);
+        foreach (var manager in managers)
+            if (manager.State == TorrentState.Error) await SafeStopAsync(manager);
 
         await ReconcileAsync();
     }
 
-    public async Task PauseAsync(TorrentManager manager)
+    public Task PauseAsync(TorrentManager manager) => PauseAsync([manager]);
+
+    public async Task PauseAsync(IReadOnlyCollection<TorrentManager> managers)
     {
-        _preferences.Update(Key(manager), e => e.PausedByUser = true);
+        foreach (var manager in managers)
+            _preferences.Update(Key(manager), e => e.PausedByUser = true);
         _preferences.Save();
         await ReconcileAsync();
     }
@@ -462,17 +476,23 @@ public sealed class TorrentService : IAsyncDisposable
     }
 
     /// <summary>Puts this torrent ahead of everything else waiting for a slot.</summary>
-    public async Task MoveToTopOfQueueAsync(TorrentManager manager)
+    public Task MoveToTopOfQueueAsync(TorrentManager manager) => MoveToTopOfQueueAsync([manager]);
+
+    /// <summary>Puts these torrents ahead of everything else, in the order they already had among themselves.</summary>
+    public async Task MoveToTopOfQueueAsync(IReadOnlyCollection<TorrentManager> managers)
     {
-        _preferences.MoveToTop(Key(manager));
+        _preferences.MoveToTop(managers.Select(Key).ToList());
         _preferences.Save();
         await ReconcileAsync();
     }
 
     /// <summary>Puts this torrent behind everything else waiting for a slot.</summary>
-    public async Task MoveToBottomOfQueueAsync(TorrentManager manager)
+    public Task MoveToBottomOfQueueAsync(TorrentManager manager) => MoveToBottomOfQueueAsync([manager]);
+
+    /// <summary>Puts these torrents behind everything else, in the order they already had among themselves.</summary>
+    public async Task MoveToBottomOfQueueAsync(IReadOnlyCollection<TorrentManager> managers)
     {
-        _preferences.MoveToBottom(Key(manager));
+        _preferences.MoveToBottom(managers.Select(Key).ToList());
         _preferences.Save();
         await ReconcileAsync();
     }
